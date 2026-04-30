@@ -119,27 +119,32 @@ function processCSV(text, filename) {
   window.currentFilename = filename;
   let lines = parseCSV(text);
   if (lines.length < 2) { alert('Arquivo vazio ou inválido.'); return; }
-  ... (rest of function unchanged, just added those two window. globals at top)
 
   // Detect SIGO vs Legacy
-  // SIGO usually has "SENHA" but maybe not on the first line
   let headerIndex = -1;
-  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+  for (let i = 0; i < Math.min(lines.length, 15); i++) {
     if (lines[i].some(c => c.trim().toUpperCase() === 'SENHA')) {
       headerIndex = i;
       break;
     }
   }
-
   if (headerIndex === -1) headerIndex = 0;
+
+  // ─── Store original structure for faithful export ─────────────────
+  window.originalLines       = lines;        // full raw parsed array
+  window.originalHeaderIndex = headerIndex;  // which line is the header
+  window.rowToLineIndex      = {};           // allRows index → lines index
+  // ──────────────────────────────────────────────────────────────────
 
   // Strip BOM and normalize headers
   const rawHeaders = lines[headerIndex].map((h, i) => {
     let clean = i === 0 ? h.replace(/^\uFEFF|^ÿ/, '') : h;
     return clean.trim().toUpperCase();
   });
+  window.originalRawHeaders = rawHeaders;
 
   const isSigoFormat = rawHeaders.includes('NOME DO PACIENTE') || rawHeaders.includes('QUEM VALIDOU?');
+  window.originalIsSigo = isSigoFormat;
 
   const SIGO_MAP = {
     'SENHA': 'Senha',
@@ -152,70 +157,59 @@ function processCSV(text, filename) {
     'STATUS': 'ENF',
     'HORARIO': 'Hora'
   };
+  // Reverse map: internal key → original column name
+  const SIGO_REVERSE = {};
+  Object.entries(SIGO_MAP).forEach(([orig, internal]) => { SIGO_REVERSE[internal] = orig; });
+  window.originalSigoReverse = SIGO_REVERSE;
 
-  // Build rows
-  allRows = lines.slice(headerIndex + 1)
-    .filter(r => r.length > 1 && norm(r[0]) !== '')
-    .map(r => {
-      const obj = {};
-      if (isSigoFormat) {
-        // Map SIGO columns to internal keys
-        rawHeaders.forEach((h, i) => {
-          const key = SIGO_MAP[h] || h;
-          obj[key] = norm(r[i] || '');
-        });
-        
-        // Synthesize missing fields for SIGO
-        if (!obj['Motivo']) obj['Motivo'] = obj['ABORDAGEM'];
-        
-        // Try to detect ACM (Acomodação) from Status
-        const statusText = (obj['ENF'] || '').toUpperCase();
-        if (statusText.includes('UTI') || statusText.includes('CTI')) obj['ACM'] = 'UTI';
-        else if (statusText.includes('APT') || statusText.includes('APART')) obj['ACM'] = 'APARTAMENTO';
-        else if (statusText.includes('ENF')) obj['ACM'] = 'ENFERMARIA';
-        else obj['ACM'] = 'N/A';
-
-        // Try to detect ALTA from Status
-        if (statusText.includes('ALTA')) obj['ALTA'] = 'ALTA HOSPITALAR';
-        else obj['ALTA'] = 'PERMANECE';
-
-        // Set ADM (table status) to a snippet of ENF
-        if (!obj['ADM']) {
-          obj['ADM'] = obj['ENF'] ? (obj['ENF'].length > 40 ? obj['ENF'].substring(0, 40) + '...' : obj['ENF']) : '–';
-        }
-
-        // Calculate Days if possible
-        if (obj['Data Internação']) {
-          const parts = obj['Data Internação'].split('/');
-          if (parts.length === 3) {
-            // Check if it's DD/MM/YYYY or MM/DD/YYYY
-            let d, m, y;
-            if (parseInt(parts[0]) > 12) { d = parts[0]; m = parts[1]; y = parts[2]; } // DD/MM
-            else { d = parts[0]; m = parts[1]; y = parts[2]; } // Default to DD/MM for Brazil
-            
-            const dateObj = new Date(y, m - 1, d);
-            if (!isNaN(dateObj)) {
-              const diff = Math.floor((new Date() - dateObj) / (1000 * 60 * 60 * 24));
-              obj['Qtde. Dias Internado'] = Math.max(0, diff).toString();
-            }
+  // Build rows — also track which original line each row came from
+  let rowIndex = 0;
+  allRows = [];
+  for (let li = headerIndex + 1; li < lines.length; li++) {
+    const r = lines[li];
+    if (r.length <= 1 || norm(r[0]) === '') continue;
+    const obj = {};
+    if (isSigoFormat) {
+      rawHeaders.forEach((h, i) => {
+        const key = SIGO_MAP[h] || h;
+        obj[key] = norm(r[i] || '');
+      });
+      if (!obj['Motivo']) obj['Motivo'] = obj['ABORDAGEM'];
+      const statusText = (obj['ENF'] || '').toUpperCase();
+      if (statusText.includes('UTI') || statusText.includes('CTI')) obj['ACM'] = 'UTI';
+      else if (statusText.includes('APT') || statusText.includes('APART')) obj['ACM'] = 'APARTAMENTO';
+      else if (statusText.includes('ENF')) obj['ACM'] = 'ENFERMARIA';
+      else obj['ACM'] = 'N/A';
+      if (statusText.includes('ALTA')) obj['ALTA'] = 'ALTA HOSPITALAR';
+      else obj['ALTA'] = 'PERMANECE';
+      if (!obj['ADM']) {
+        obj['ADM'] = obj['ENF'] ? (obj['ENF'].length > 40 ? obj['ENF'].substring(0, 40) + '...' : obj['ENF']) : '–';
+      }
+      if (obj['Data Internação']) {
+        const parts = obj['Data Internação'].split('/');
+        if (parts.length === 3) {
+          const dateObj = new Date(parts[2], parts[1] - 1, parts[0]);
+          if (!isNaN(dateObj)) {
+            const diff = Math.floor((new Date() - dateObj) / (1000 * 60 * 60 * 24));
+            obj['Qtde. Dias Internado'] = Math.max(0, diff).toString();
           }
         }
-      } else {
-        // Legacy format
-        lines[headerIndex].forEach((h, i) => {
-          const cleanH = i === 0 ? h.replace(/^\uFEFF|^ÿ/, '') : h;
-          obj[cleanH] = norm(r[i] || '');
-        });
       }
-      return obj;
-    });
+    } else {
+      lines[headerIndex].forEach((h, i) => {
+        const cleanH = i === 0 ? h.replace(/^\uFEFF|^ÿ/, '') : h;
+        obj[cleanH] = norm(r[i] || '');
+      });
+    }
+    window.rowToLineIndex[rowIndex] = li;  // track mapping
+    allRows.push(obj);
+    rowIndex++;
+  }
 
-  // Update file info
   const dateMatch = filename.match(/(\d{2})[._](\d{2})/);
   const dateStr = dateMatch ? `${dateMatch[1]}/${dateMatch[2]}` : '';
   document.getElementById('fileInfoText').textContent = `${filename}${dateStr ? ' – ' + dateStr : ''} (${allRows.length} registros)`;
 
-  // Reset state
   activeFilters = {};
   searchQuery = '';
   currentPage = 1;
@@ -223,7 +217,6 @@ function processCSV(text, filename) {
   sortDir = 'asc';
   document.getElementById('searchInput').value = '';
 
-  // Build UI
   headers = Object.keys(allRows[0] || {});
   buildFilters();
   buildTableHeader();
@@ -549,34 +542,85 @@ function applyFiltersAndSearch() {
 }
 
 // ─── EXPORT ──────────────────────────────────
+// Escapes a single cell value for CSV
+function csvCell(val, delim) {
+  val = (val === undefined || val === null) ? '' : String(val);
+  if (val.includes(delim) || val.includes('"') || val.includes('\n') || val.includes('\r')) {
+    val = '"' + val.replace(/"/g, '""') + '"';
+  }
+  return val;
+}
+
+// Reconstruct the ORIGINAL file structure, writing back only the edited cells.
+// All preamble rows, blank columns, and original column names are preserved.
+function exportFullCopy() {
+  if (!window.originalLines || allRows.length === 0) {
+    alert('Nenhum arquivo carregado para exportar.');
+    return;
+  }
+
+  const delim     = window.currentDelimiter || ',';
+  const isSigo    = window.originalIsSigo;
+  const rawHdrs   = window.originalRawHeaders || [];
+  const reverse   = window.originalSigoReverse || {};
+  const origLines = window.originalLines;  // reference — we mutate cells in place
+
+  // Write edited data back into originalLines
+  allRows.forEach((row, rowIdx) => {
+    const lineIdx = window.rowToLineIndex[rowIdx];
+    if (lineIdx === undefined) return;
+    const line = origLines[lineIdx];  // array of cell strings
+
+    rawHdrs.forEach((origColName, colIdx) => {
+      if (colIdx >= line.length) return;
+      // Which internal key corresponds to this original column?
+      const internalKey = isSigo ? ({
+        'SENHA': 'Senha', 'HOSPITAL': 'Prestador',
+        'NOME DO PACIENTE': 'Usuário', 'CARTEIRINHA': 'Código Usuário',
+        'DATA DE INCLUSÃO': 'Data Internação', 'PENDÊNCIA': 'Motivo',
+        'QUEM VALIDOU?': 'Auditor', 'STATUS': 'ENF', 'HORARIO': 'Hora'
+      }[origColName] || origColName) : origColName;
+
+      if (row[internalKey] !== undefined) {
+        line[colIdx] = row[internalKey];
+      }
+    });
+  });
+
+  // Re-serialize all original lines (preserving blank columns)
+  const csvContent = origLines.map(line =>
+    line.map(cell => csvCell(cell, delim)).join(delim)
+  ).join('\r\n');
+
+  const filename    = window.currentFilename || 'rdi_export.csv';
+  const newFilename = filename.replace(/\.csv$/i, '') + '_editado.csv';
+
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = newFilename;
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  showToast('✅ Cópia fiel salva: ' + newFilename);
+}
+
+// Legacy filtered export (keeps old behaviour for partial exports)
 function exportToCSV() {
   if (filteredRows.length === 0) return;
-  
-  // Use the same delimiter as the source if possible
-  const delimiter = detectDelimiter(allRows.length > 0 ? Object.keys(allRows[0]).join(',') : ','); 
-  // Actually it's better to just use what we detected during load
-  const currentDelimiter = window.currentDelimiter || ',';
-
-  const csvHeaders = headers.join(currentDelimiter);
-  const csvRows = filteredRows.map(row => {
-    return headers.map(h => {
-      let val = row[h] || '';
-      if (typeof val === 'string' && (val.includes(currentDelimiter) || val.includes('"') || val.includes('\n'))) {
-        val = `"${val.replace(/"/g, '""')}"`;
-      }
-      return val;
-    }).join(currentDelimiter);
-  });
-  const csvContent = "\uFEFF" + csvHeaders + "\n" + csvRows.join("\n");
+  const delim = window.currentDelimiter || ',';
+  const csvHeaders = headers.map(h => csvCell(h, delim)).join(delim);
+  const csvRows = filteredRows.map(row =>
+    headers.map(h => csvCell(row[h] || '', delim)).join(delim)
+  );
+  const csvContent = '\uFEFF' + csvHeaders + '\n' + csvRows.join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  link.setAttribute("href", url);
-  
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
   const filename = window.currentFilename || 'rdi_export.csv';
-  const newFilename = filename.replace(/\.csv$/i, '') + '_editado.csv';
-  
-  link.setAttribute("download", newFilename);
+  link.download = filename.replace(/\.csv$/i, '') + '_filtrado.csv';
   link.style.visibility = 'hidden';
   document.body.appendChild(link);
   link.click();
@@ -848,19 +892,35 @@ function saveRowChanges(index) {
   const row = allRows[index];
   if (!row) return;
 
+  // 1. Update the in-memory row object
   const inputs = document.querySelectorAll('.modal-input, .modal-textarea');
   inputs.forEach(el => {
     const key = el.dataset.key;
-    row[key] = el.value;
+    if (key) row[key] = el.value;
   });
 
-  // Re-run processing to update virtual fields if necessary (like ACM/ALTA in SIGO)
-  // For simplicity, we just trigger a refresh of the UI
+  // 2. Write back to original raw lines (so export stays faithful)
+  const lineIdx = window.rowToLineIndex ? window.rowToLineIndex[index] : undefined;
+  if (lineIdx !== undefined && window.originalLines) {
+    const rawHdrs = window.originalRawHeaders || [];
+    const isSigo  = window.originalIsSigo;
+    const line    = window.originalLines[lineIdx];
+    const SIGO_MAP_LOCAL = {
+      'SENHA': 'Senha', 'HOSPITAL': 'Prestador',
+      'NOME DO PACIENTE': 'Usuário', 'CARTEIRINHA': 'Código Usuário',
+      'DATA DE INCLUSÃO': 'Data Internação', 'PENDÊNCIA': 'Motivo',
+      'QUEM VALIDOU?': 'Auditor', 'STATUS': 'ENF', 'HORARIO': 'Hora'
+    };
+    rawHdrs.forEach((origCol, colIdx) => {
+      if (colIdx >= line.length) return;
+      const internalKey = isSigo ? (SIGO_MAP_LOCAL[origCol] || origCol) : origCol;
+      if (row[internalKey] !== undefined) line[colIdx] = row[internalKey];
+    });
+  }
+
   applyFiltersAndSearch();
   closeModal();
-  
-  // Show a mini notification
-  showToast('Alterações salvas localmente');
+  showToast('✅ Alterações salvas — use "Salvar Cópia" para baixar o arquivo');
 }
 
 function showToast(msg) {
