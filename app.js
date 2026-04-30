@@ -115,8 +115,11 @@ document.getElementById('csvInput').addEventListener('change', function (e) {
 });
 
 function processCSV(text, filename) {
+  window.currentDelimiter = detectDelimiter(text);
+  window.currentFilename = filename;
   let lines = parseCSV(text);
   if (lines.length < 2) { alert('Arquivo vazio ou inválido.'); return; }
+  ... (rest of function unchanged, just added those two window. globals at top)
 
   // Detect SIGO vs Legacy
   // SIGO usually has "SENHA" but maybe not on the first line
@@ -548,22 +551,32 @@ function applyFiltersAndSearch() {
 // ─── EXPORT ──────────────────────────────────
 function exportToCSV() {
   if (filteredRows.length === 0) return;
-  const csvHeaders = headers.join(',');
+  
+  // Use the same delimiter as the source if possible
+  const delimiter = detectDelimiter(allRows.length > 0 ? Object.keys(allRows[0]).join(',') : ','); 
+  // Actually it's better to just use what we detected during load
+  const currentDelimiter = window.currentDelimiter || ',';
+
+  const csvHeaders = headers.join(currentDelimiter);
   const csvRows = filteredRows.map(row => {
     return headers.map(h => {
       let val = row[h] || '';
-      if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+      if (typeof val === 'string' && (val.includes(currentDelimiter) || val.includes('"') || val.includes('\n'))) {
         val = `"${val.replace(/"/g, '""')}"`;
       }
       return val;
-    }).join(',');
+    }).join(currentDelimiter);
   });
   const csvContent = "\uFEFF" + csvHeaders + "\n" + csvRows.join("\n");
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement("a");
   const url = URL.createObjectURL(blob);
   link.setAttribute("href", url);
-  link.setAttribute("download", `rdi_filtrado_${new Date().toISOString().slice(0,10)}.csv`);
+  
+  const filename = window.currentFilename || 'rdi_export.csv';
+  const newFilename = filename.replace(/\.csv$/i, '') + '_editado.csv';
+  
+  link.setAttribute("download", newFilename);
   link.style.visibility = 'hidden';
   document.body.appendChild(link);
   link.click();
@@ -783,6 +796,8 @@ function openModal(globalIndex) {
   const row = filteredRows[globalIndex];
   if (!row) return;
 
+  const actualIndex = allRows.indexOf(row);
+
   document.getElementById('modalTitle').textContent = row['Usuário'] || 'Paciente';
   document.getElementById('modalSubtitle').textContent =
     `Senha: ${row['Senha']} · ${row['Prestador']} · Data: ${row['Data Internação'] || '–'}`;
@@ -791,10 +806,8 @@ function openModal(globalIndex) {
   const shortFields = [];
   const longFields  = [];
 
-  // Itera TODAS as chaves presentes no objeto da linha
-  // (inclui qualquer coluna presente no CSV, mesmo que futura)
   for (const key of Object.keys(row)) {
-    if (!key || key.trim() === '') continue; // pula colunas sem nome
+    if (!key || key.trim() === '') continue;
     const val = row[key] || '';
     const isLong = LONG_TEXT_KEYS.has(key) || val.length > 120;
     if (isLong) {
@@ -804,28 +817,62 @@ function openModal(globalIndex) {
     }
   }
 
-  // Render grid de campos curtos
   const grid = shortFields.map(f => `
     <div class="modal-field">
       <div class="modal-field-label">${f.label}</div>
-      <div class="modal-field-value ${f.val ? '' : 'empty'}">${f.val || 'Não informado'}</div>
+      <input type="text" class="modal-input" data-key="${f.key}" value="${f.val}" placeholder="Não informado">
     </div>`).join('');
 
-  // Render áreas de texto longo
   const textAreas = longFields
-    .filter(f => f.val && f.val.length > 0)
     .map(f => `
       <div class="modal-text-area">
         <div class="modal-text-label">${f.label}</div>
-        <div class="modal-text-content">${escapeHtml(f.val)}</div>
+        <textarea class="modal-textarea" data-key="${f.key}" rows="4">${f.val}</textarea>
       </div>`).join('');
 
   document.getElementById('modalBody').innerHTML = `
     <div class="modal-grid">${grid}</div>
     ${textAreas}
+    <div class="modal-footer">
+      <button class="btn-save-row" onclick="saveRowChanges(${actualIndex})">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Salvar Alterações
+      </button>
+    </div>
   `;
 
   document.getElementById('modalOverlay').classList.add('open');
+}
+
+function saveRowChanges(index) {
+  const row = allRows[index];
+  if (!row) return;
+
+  const inputs = document.querySelectorAll('.modal-input, .modal-textarea');
+  inputs.forEach(el => {
+    const key = el.dataset.key;
+    row[key] = el.value;
+  });
+
+  // Re-run processing to update virtual fields if necessary (like ACM/ALTA in SIGO)
+  // For simplicity, we just trigger a refresh of the UI
+  applyFiltersAndSearch();
+  closeModal();
+  
+  // Show a mini notification
+  showToast('Alterações salvas localmente');
+}
+
+function showToast(msg) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.classList.add('visible'), 100);
+  setTimeout(() => {
+    toast.classList.remove('visible');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 function closeModal() {
