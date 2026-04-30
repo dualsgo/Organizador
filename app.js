@@ -670,39 +670,80 @@ function getAIAnalysis(row) {
   const mot = (row['Motivo'] || '').toLowerCase();
   const text = `${enf} ${med} ${mot}`;
 
-  if (!enf && !med && !mot) return { score: 0, label: 'Sem dados', color: 'var(--text-3)', reasons: ['Falta de informações clínicas para análise.'] };
+  if (!enf && !med && !mot) return { 
+    score: 0, 
+    label: 'Sem dados', 
+    color: 'var(--text-3)', 
+    reasons: ['Falta de informações clínicas para análise.'],
+    matches: [] 
+  };
 
   const positive = [
-    { t: 'melhora', w: 15 }, { t: 'estável', w: 10 }, { t: 'estabilidade', w: 10 },
-    { t: 'boa evolução', w: 15 }, { t: 'alta', w: 25 }, { t: 'proposta', w: 15 },
-    { t: 'aceita dieta', w: 10 }, { t: 'afebril', w: 10 }, { t: 'deambula', w: 10 },
-    { t: 'lúcido', w: 5 }, { t: 'orientado', w: 5 }, { t: 'concluído', w: 10 },
-    { t: 'alta hospitalar', w: 30 }, { t: 'programada', w: 20 }
+    { t: 'melhora', w: 15, label: 'Melhora clínica' }, 
+    { t: 'estável', w: 10, label: 'Estabilidade' }, 
+    { t: 'estabilidade', w: 10, label: 'Estabilidade' },
+    { t: 'boa evolução', w: 15, label: 'Boa evolução' }, 
+    { t: 'alta', w: 25, label: 'Menção de alta' }, 
+    { t: 'proposta', w: 15, label: 'Proposta de conduta' },
+    { t: 'aceita dieta', w: 10, label: 'Aceitando dieta' }, 
+    { t: 'afebril', w: 10, label: 'Afebril' }, 
+    { t: 'deambula', w: 10, label: 'Deambulando' },
+    { t: 'lúcido', w: 5, label: 'Lúcido' }, 
+    { t: 'orientado', w: 5, label: 'Orientado' }, 
+    { t: 'concluído', w: 10, label: 'Ciclo concluído' },
+    { t: 'alta hospitalar', w: 30, label: 'Alta hospitalar' }, 
+    { t: 'programada', w: 20, label: 'Alta programada' },
+    { t: 'aguarda exames', w: -5, label: 'Aguardando exames' },
+    { t: 'exames ok', w: 15, label: 'Exames satisfatórios' },
+    { t: 'retirada de dreno', w: 15, label: 'Retirada de dreno' },
+    { t: 'medicação oral', w: 15, label: 'Migração para VO' },
+    { t: 'fisioterapia motora', w: 5, label: 'Fisioterapia' }
   ];
 
   const negative = [
-    { t: 'piora', w: 25 }, { t: 'instável', w: 20 }, { t: 'grave', w: 20 },
-    { t: 'crítico', w: 25 }, { t: 'febre', w: 15 }, { t: 'aguardando exames', w: 15 },
-    { t: 'pendente', w: 10 }, { t: 'uti', w: 30 }, { t: 'cti', w: 30 },
-    { t: 'desorientado', w: 15 }, { t: 'dor intensa', w: 15 }, { t: 'transferência', w: 10 }
+    { t: 'piora', w: 25, label: 'Piora clínica' }, 
+    { t: 'instável', w: 20, label: 'Instabilidade' }, 
+    { t: 'grave', w: 20, label: 'Quadro grave' },
+    { t: 'crítico', w: 25, label: 'Estado crítico' }, 
+    { t: 'febre', w: 15, label: 'Febre' }, 
+    { t: 'aguardando exames', w: 15, label: 'Pendência de exames' },
+    { t: 'pendente', w: 10, label: 'Pendência' }, 
+    { t: 'uti', w: 30, label: 'Em regime de UTI' }, 
+    { t: 'cti', w: 30, label: 'Em regime de CTI' },
+    { t: 'desorientado', w: 15, label: 'Desorientação' }, 
+    { t: 'dor intensa', w: 15, label: 'Dor intensa' }, 
+    { t: 'transferência', w: 10, label: 'Necessita transferência' },
+    { t: 'rebaixamento', w: 25, label: 'Rebaixamento de consciência' },
+    { t: 'sepse', w: 30, label: 'Sepse/Choque' },
+    { t: 'isquemia', w: 20, label: 'Isquemia' }
   ];
 
   let score = 30; // base score
   const reasons = [];
+  const matches = [];
 
   positive.forEach(p => {
     if (text.includes(p.t)) {
       score += p.w;
-      if (p.w >= 15) reasons.push(`Indício de ${p.t}`);
+      matches.push({ type: 'pos', text: p.t, label: p.label });
+      if (p.w >= 15) reasons.push(`Indício de ${p.label}`);
     }
   });
 
   negative.forEach(n => {
     if (text.includes(n.t)) {
       score -= n.w;
-      if (n.w >= 15) reasons.push(`Alerta: ${n.t}`);
+      matches.push({ type: 'neg', text: n.t, label: n.label });
+      if (n.w >= 15) reasons.push(`Alerta: ${n.label}`);
     }
   });
+
+  // Score adjustments based on days
+  const days = parseInt(row['Qtde. Dias Internado']) || 0;
+  if (days > 15) {
+    score -= 5;
+    reasons.push('Longa permanência (>15 dias)');
+  }
 
   score = Math.max(5, Math.min(98, score));
 
@@ -711,7 +752,7 @@ function getAIAnalysis(row) {
   if (score > 70) { label = 'Alta'; color = 'var(--success)'; }
   else if (score > 40) { label = 'Média'; color = 'var(--warning)'; }
 
-  return { score, label, color, reasons: reasons.slice(0, 3) };
+  return { score, label, color, reasons: [...new Set(reasons)].slice(0, 4), matches };
 }
 
 // ─── PAGINATION ──────────────────────────────
@@ -858,8 +899,28 @@ function openModal(globalIndex) {
         <span class="ai-insight-badge" style="background: ${ai.color}22; color: ${ai.color}">${ai.label} (${ai.score}%)</span>
       </div>
       <div class="ai-insight-body">
-        <p>Com base na análise de Evolução e Avaliação Médica, o paciente apresenta <strong>${ai.label.toLowerCase()} possibilidade de alta</strong> no curto prazo.</p>
-        ${ai.reasons.length ? `<ul class="ai-reasons">${ai.reasons.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
+        <div class="ai-main-conclusion">
+          Com base na análise clínica, o paciente apresenta <strong>${ai.label.toLowerCase()} possibilidade de alta</strong> no curto prazo.
+        </div>
+        
+        <div class="ai-details-grid">
+          <div class="ai-details-col">
+            <div class="ai-detail-label">Motivos da Análise</div>
+            <ul class="ai-reasons">
+              ${ai.reasons.length ? ai.reasons.map(r => `<li>${r}</li>`).join('') : '<li>Sem evidências conclusivas</li>'}
+            </ul>
+          </div>
+          <div class="ai-details-col">
+            <div class="ai-detail-label">Frases-chave Identificadas</div>
+            <div class="ai-tags">
+              ${ai.matches.length ? ai.matches.map(m => `
+                <span class="ai-tag ${m.type}">
+                  ${m.label} <small>"${m.text}"</small>
+                </span>
+              `).join('') : '<span class="ai-tag empty">Nenhuma frase identificada</span>'}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   `;
