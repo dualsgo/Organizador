@@ -13,11 +13,9 @@ let sortDir = 'asc';
 let activeFilters = {};
 let searchQuery = '';
 let activeKpi = null; // id of the currently active KPI card
-let geminiCache = {}; // Cache for Gemini API results
 
 // ─── VISIBLE COLUMNS in TABLE ────────────────
 const TABLE_COLS = [
-  { key: 'IA_ALTA',            label: 'IA: Chance Alta' },
   { key: 'Senha',              label: 'Senha' },
   { key: 'Usuário',            label: 'Paciente' },
   { key: 'Prestador',          label: 'Prestador' },
@@ -157,10 +155,7 @@ function buildKPIs(rows) {
   // Always compute counts from ALL rows so values don't collapse when filtered
   const base = allRows;
   const total = base.length;
-  const utis = base.filter(r => r['ACM'] && r['ACM'].toUpperCase().includes('UTI')).length;
-  const oncos = base.filter(r => r['ONCO'] && r['ONCO'] !== '').length;
   const reint = base.filter(r => r['REINTERNAÇÃO'] && r['REINTERNAÇÃO'].toUpperCase() === 'SIM').length;
-  const aiHigh = base.filter(r => getAIAnalysis(r).score > 70).length;
 
 
   // Avg dias from currently filtered rows
@@ -205,15 +200,6 @@ function buildKPIs(rows) {
       filter: { key: 'REINTERNAÇÃO', value: 'SIM' }
     },
     {
-      id: 'aihigh',
-      label: 'Alta Provável (IA)',
-      value: aiHigh,
-      sub: `score acima de 70%`,
-      color: 'teal',
-      tip: 'Filtrar pacientes com alta probabilidade de alta via IA',
-      filter: { key: '_ai_high', value: true }
-    },
-    {
       id: 'avgdias',
       label: 'Média Dias Int.',
       value: avgDias,
@@ -256,13 +242,7 @@ function buildHighlights(rows) {
     return (acm.includes('UTI') || acm.includes('CTI')) && dias >= 7;
   }).slice(0, 5);
 
-  // 2. High Discharge Prob: AI Score > 70
-  const highDischarge = rows.filter(r => {
-    const ai = getAIAnalysis(r);
-    return ai.score >= 70;
-  }).slice(0, 5);
-
-  // 3. Long Stay Alert: Dias > 15
+  // 2. Long Stay Alert: Dias > 15
   const longStay = rows.filter(r => {
     const dias = parseInt(r['Qtde. Dias Internado']) || 0;
     return dias >= 15;
@@ -270,7 +250,6 @@ function buildHighlights(rows) {
 
   container.innerHTML = `
     ${renderHighlightCard('Casos Críticos (UTI + 7d)', critical, 'critical', 'alert-circle', 'Dias')}
-    ${renderHighlightCard('Probabilidade Alta (>70%)', highDischarge, 'success', 'check-circle', '% Alta')}
     ${renderHighlightCard('Longa Permanência (>15d)', longStay, 'warning', 'clock', 'Dias')}
   `;
 }
@@ -290,8 +269,8 @@ function renderHighlightCard(title, items, type, icon, labelTag) {
       </div>
       <div class="highlight-list">
         ${items.length ? items.map(r => {
-          const val = labelTag === '% Alta' ? getAIAnalysis(r).score : (r['Qtde. Dias Internado'] || '0');
-          const badgeClass = type === 'critical' ? 'badge-red-outline' : type === 'success' ? 'badge-green-outline' : 'badge-yellow-outline';
+          const val = r['Qtde. Dias Internado'] || '0';
+          const badgeClass = type === 'critical' ? 'badge-red-outline' : 'badge-yellow-outline';
           const idx = allRows.indexOf(r);
           return `
             <div class="highlight-item" onclick="openModal(${idx})">
@@ -299,7 +278,7 @@ function renderHighlightCard(title, items, type, icon, labelTag) {
                 <div class="highlight-item-name">${r['Usuário'] || 'Paciente'}</div>
                 <div class="highlight-item-sub">${r['Prestador'] || '–'}</div>
               </div>
-              <div class="highlight-item-badge ${badgeClass}">${val}${labelTag === '% Alta' ? '%' : 'd'}</div>
+              <div class="highlight-item-badge ${badgeClass}">${val}d</div>
             </div>
           `;
         }).join('') : '<div class="highlight-empty">Nenhum caso identificado</div>'}
@@ -345,7 +324,6 @@ function applyKpiFilter(kpiId) {
     delete activeKpi; // clear KPI context
     delete activeFilters['_uti'];
     delete activeFilters['_onco'];
-    delete activeFilters['_ai_high'];
 
     // But restore select-driven filters if user had set them
     // (they're cleared here for simplicity; selects already reset below)
@@ -360,14 +338,12 @@ function applyKpiFilter(kpiId) {
   // Clear any previous KPI-driven custom keys
   delete activeFilters['_uti'];
   delete activeFilters['_onco'];
-  delete activeFilters['_ai_high'];
 
 
   const kpiMap = {
     reint:     { key: 'REINTERNAÇÃO', value: 'SIM' },
     uti:       { key: '_uti',         value: true },
     onco:      { key: '_onco',        value: true },
-    aihigh:    { key: '_ai_high',     value: true },
   };
 
   const f = kpiMap[kpiId];
@@ -443,10 +419,6 @@ function applyFiltersAndSearch() {
       }
       if (key === '_onco') {
         if (!(row['ONCO'] && row['ONCO'] !== '')) return false;
-        continue;
-      }
-      if (key === '_ai_high') {
-        if (!(getAIAnalysis(row).score > 70)) return false;
         continue;
       }
       if (row[key] !== val) return false;
@@ -527,12 +499,6 @@ function applySorting() {
     let vb = b[sortCol] || '';
     // Numeric sort for dias/idade
     if (sortCol === 'Qtde. Dias Internado' || sortCol === 'Idade Usuário') {
-      va = parseInt(va) || 0; vb = parseInt(vb) || 0;
-      return sortDir === 'asc' ? va - vb : vb - va;
-    }
-    // Special sort for IA_ALTA (virtual score)
-    if (sortCol === 'IA_ALTA') {
-      va = getAIAnalysis(a).score; vb = getAIAnalysis(b).score;
       return sortDir === 'asc' ? va - vb : vb - va;
     }
     if (va < vb) return sortDir === 'asc' ? -1 : 1;
@@ -558,7 +524,7 @@ function renderTable() {
   document.getElementById('tableBody').innerHTML = pageRows.map((row, i) => `
     <tr onclick="openModal(${start + i})">
       ${TABLE_COLS.map(c => {
-        const val = c.key === 'IA_ALTA' ? getAIAnalysis(row).score : row[c.key];
+        const val = row[c.key];
         return `<td>${renderCell(c.key, val, row)}</td>`;
       }).join('')}
     </tr>
@@ -618,108 +584,9 @@ function renderCell(key, val, row) {
     }
     case 'Idade Usuário':
       return `<span style="font-weight:500">${val || '–'}</span>`;
-    case 'IA_ALTA': {
-      const { score, label, color } = getAIAnalysis(row);
-      return `
-        <div class="ai-cell">
-          <div class="ai-badge" style="border-color: ${color}; color: ${color}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="ai-spark">
-              <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
-            </svg>
-            <span>${label}</span>
-          </div>
-          <div class="ai-progress-bg"><div class="ai-progress-bar" style="width: ${score}%; background: ${color}"></div></div>
-        </div>
-      `;
-    }
     default:
       return val || '<span style="color:var(--text-3)">–</span>';
   }
-}
-
-// ─── AI ANALYSIS ENGINE ──────────────────────
-function getAIAnalysis(row) {
-  const enf = (row['ENF'] || '').toLowerCase();
-  const med = (row['MEDICA'] || '').toLowerCase();
-  const mot = (row['Motivo'] || '').toLowerCase();
-  const text = `${enf} | ${med} | ${mot}`;
-
-  if (!enf && !med && !mot) return { 
-    score: 0, 
-    label: 'Sem dados', 
-    color: 'var(--text-3)', 
-    reasons: ['Falta de informações clínicas para análise.'],
-    matches: [] 
-  };
-
-  // Complex Contextual Rules (Regex)
-  const rules = [
-    // HIGH POSITIVE (Discharge imminent)
-    { reg: /alta (hospitalar|programada|amanhã|hoje|confirmada)/i, w: 40, label: 'Alta confirmada/programada', type: 'pos' },
-    { reg: /proposta de alta|planejamento de alta|previsão de alta/i, w: 25, label: 'Planejamento de alta', type: 'pos' },
-    { reg: /aguarda (transporte|familiar|ambulância) para alta/i, w: 35, label: 'Aguardando saída', type: 'pos' },
-    
-    // POSITIVE PROGRESSION
-    { reg: /(boa|excelente) evolução|evoluindo bem/i, w: 15, label: 'Boa evolução clínica', type: 'pos' },
-    { reg: /estável (com melhora|sem intercorrências)/i, w: 15, label: 'Estabilidade favorável', type: 'pos' },
-    { reg: /quadro estável|paciente estável|segue estável/i, w: 10, label: 'Estabilidade clínica', type: 'pos' },
-    { reg: /aceitando dieta (oral|vo)|dieta livre/i, w: 10, label: 'Alimentação preservada', type: 'pos' },
-    { reg: /lúcido[,\s]+orientado[,\s]+afebril/i, w: 15, label: 'Quadro clínico limpo', type: 'pos' },
-    { reg: /migração para (vo|medicação oral)|término de (atb|antibiótico)/i, w: 20, label: 'Desmame de medicação EV', type: 'pos' },
-    { reg: /deambula|fora do leito|sentado na poltrona/i, w: 10, label: 'Paciente mobilizado', type: 'pos' },
-    { reg: /exames (dentro da normalidade|normais|ok)/i, w: 15, label: 'Exames laboratoriais normais', type: 'pos' },
-    { reg: /retirada de (dreno|cateter|sonda)/i, w: 12, label: 'Retirada de dispositivos', type: 'pos' },
-
-    // NEGATIONS (Positive)
-    { reg: /sem (febre|picos febris|novas queixas|intercorrências|vômitos)/i, w: 10, label: 'Ausência de sintomas críticos', type: 'pos' },
-    { reg: /sem (dor|dispneia|desconforto|sangramento)/i, w: 8, label: 'Conforto clínico', type: 'pos' },
-
-    // PENDING / CAUTIOUS
-    { reg: /aguarda (exames|resultado|avaliação|imagem|tomografia|ressonância)/i, w: -10, label: 'Aguardando exames', type: 'neg' },
-    { reg: /aguarda (parecer|especialista|vaga|transferência|transporte)/i, w: -15, label: 'Dependência de logística/parecer', type: 'neg' },
-    { reg: /em investigação|quadro a esclarecer|hipótese diagnóstica/i, w: -10, label: 'Diagnóstico pendente', type: 'neg' },
-    { reg: /estável porém (grave|reservado)/i, w: -10, label: 'Estabilidade com gravidade', type: 'neg' },
-
-    // NEGATIVE / CRITICAL
-    { reg: /quadro (grave|crítico|instável)/i, w: -30, label: 'Quadro clínico instável', type: 'neg' },
-    { reg: /piora (clínica|do padrão|neurológica)/i, w: -25, label: 'Piora clínica', type: 'neg' },
-    { reg: /sepse|choque|insuficiência|insuficiente/i, w: -35, label: 'Condição de risco vital', type: 'neg' },
-    { reg: /rebaixamento (do nível de consciência|sensório)/i, w: -25, label: 'Comprometimento neurológico', type: 'neg' },
-    { reg: /em regime de (uti|cti|semi)/i, w: -30, label: 'Unidade Intensiva', type: 'neg' },
-    { reg: /necessita (diálise|hemodiálise|ventilação)/i, w: -20, label: 'Suporte avançado de vida', type: 'neg' },
-    { reg: /febre|pico febril|leucocitose/i, w: -15, label: 'Sinais de infecção ativa', type: 'neg' }
-  ];
-
-  let score = 35; // base score
-  const reasons = [];
-
-  rules.forEach(rule => {
-    if (rule.reg.test(text)) {
-      score += rule.w;
-      if (Math.abs(rule.w) >= 10) {
-        reasons.push(rule.label);
-      }
-    }
-  });
-
-  // Score adjustments based on days
-  const days = parseInt(row['Qtde. Dias Internado']) || 0;
-  if (days > 15) {
-    score -= 5;
-    reasons.push('Longa permanência no hospital');
-  }
-  if (days < 3) {
-    score += 5;
-  }
-
-  score = Math.max(5, Math.min(98, score));
-
-  let label = 'Baixa';
-  let color = 'var(--danger)';
-  if (score > 70) { label = 'Alta'; color = 'var(--success)'; }
-  else if (score > 40) { label = 'Média'; color = 'var(--warning)'; }
-
-  return { score, label, color, reasons: [...new Set(reasons)].slice(0, 5) };
 }
 
 // ─── PAGINATION ──────────────────────────────
@@ -854,221 +721,13 @@ function openModal(globalIndex) {
         <div class="modal-text-content">${escapeHtml(f.val)}</div>
       </div>`).join('');
 
-  // IA Insight Section
-  const regexAi = getAIAnalysis(row);
-  const aiSectionId = `ai-section-${globalIndex}`;
-  
-  const aiSection = `
-    <div class="modal-ai-insight" id="${aiSectionId}">
-      <div class="ai-insight-header">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ai-insight-icon">
-          <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
-        </svg>
-        <span>Análise Preditiva de Alta</span>
-        <span class="ai-insight-badge" style="background: ${regexAi.color}22; color: ${regexAi.color}">${regexAi.label} (${regexAi.score}%)</span>
-      </div>
-      <div class="ai-insight-body">
-        <div class="ai-main-conclusion">
-          ${regexAi.label === 'Sem dados' ? 'Aguardando dados clínicos...' : `Análise preliminar indica <strong>${regexAi.label.toLowerCase()} possibilidade de alta</strong>.`}
-        </div>
-        <div class="ai-loading-placeholder" id="gemini-loading" style="display:none">
-          <div class="spinner-small"></div> Consultando Inteligência Médica Gemini...
-        </div>
-        <div id="gemini-result">
-          <div class="ai-details-grid" style="grid-template-columns: 1fr;">
-            <div class="ai-details-col">
-              <div class="ai-detail-label">Fatores Determinantes</div>
-              <ul class="ai-reasons">
-                ${regexAi.reasons.length ? regexAi.reasons.map(r => `<li>${r}</li>`).join('') : '<li>Dados clínicos insuficientes para uma conclusão clara.</li>'}
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
   document.getElementById('modalBody').innerHTML = `
-    ${aiSection}
     <div class="modal-grid">${grid}</div>
     ${textAreas}
   `;
 
   document.getElementById('modalOverlay').classList.add('open');
-
-  // Trigger Gemini if API Key is present
-  const apiKey = document.getElementById('geminiKey').value;
-  if (apiKey && (row['ENF'] || row['MEDICA'] || row['Motivo'])) {
-    runGeminiAnalysis(row, aiSectionId, apiKey);
-  }
 }
-
-async function runGeminiAnalysis(row, containerId, apiKey) {
-  const cacheKey = row['Senha'];
-  const loading = document.getElementById('gemini-loading');
-  const resultDiv = document.getElementById('gemini-result');
-  
-  if (geminiCache[cacheKey]) {
-    renderGeminiResult(geminiCache[cacheKey], resultDiv);
-    return;
-  }
-
-  loading.style.display = 'flex';
-  
-  try {
-    const prompt = `Realize uma análise clínica avançada e estruturada para estimar a probabilidade de alta hospitalar, considerando evolução temporal, estabilidade clínica e dependência de suporte.
-
-OBJETIVO:
-Determinar se o paciente apresenta condições reais de alta ou se ainda depende de suporte hospitalar ativo.
-
-ETAPAS OBRIGATÓRIAS DE ANÁLISE:
-
-1. COMPREENSÃO DO CASO INICIAL
-- Identifique o quadro que motivou a internação.
-- Classifique implicitamente a gravidade e natureza (ex: agudo reversível vs doença crônica avançada).
-- Defina o objetivo da internação (ex: estabilização, controle sintomático, tratamento curativo/paliativo).
-
-2. ANÁLISE DA EVOLUÇÃO TEMPORAL
-- Leia a evolução médica em ordem cronológica.
-- Identifique tendência dominante:
-  • Melhora progressiva
-  • Estabilidade
-  • Piora/intercorrências recorrentes
-- Diferencie eventos antigos vs recentes (dar maior peso aos últimos registros).
-- Detecte surgimento de novas queixas ou complicações.
-
-3. ESTABILIDADE CLÍNICA ATUAL
-Avalie se há estabilidade nos seguintes eixos:
-- Hemodinâmica (ex: taquicardia persistente, instabilidade)
-- Sintomas principais (dor, dispneia, vômitos, etc.)
-- Capacidade funcional mínima (alimentação, controle de sintomas)
-- Necessidade de intervenções frequentes
-
-4. DEPENDÊNCIA DE SUPORTE HOSPITALAR
-Classifique implicitamente o nível de dependência:
-- Baixa: pode manter tratamento fora do hospital
-- Moderada: necessita suporte, mas possível transição (home care, etc.)
-- Alta: depende claramente de ambiente hospitalar
-
-Considere como fatores de alta dependência:
-- Nutrição parenteral contínua (NPT)
-- SNG aberta ou suporte invasivo
-- Necessidade frequente de intervenções (paracentese, drenagem, etc.)
-- Controle sintomático instável
-
-5. PENDÊNCIAS QUE IMPACTAM ALTA
-Separe claramente:
-- Pendências administrativas/logísticas (ex: "aguarda desospitalização")
-- Pendências clínicas relevantes (ex: exames, instabilidade, sangramento ativo)
-
-Importante:
-→ Nem toda pendência impede alta. Avaliar impacto real.
-
-6. CONTEXTO DO TEMPO DE INTERNAÇÃO
-- Relacione ${row['Qtde. Dias Internado']} dias com:
-  • Complexidade do caso
-  • Evolução clínica
-- Longa permanência com estabilidade pode sugerir elegibilidade para alta (ou transição de cuidado)
-
-REGRAS DE DECISÃO:
-
-- Aumentar probabilidade se:
-  • Estável clinicamente
-  • Sem novas intercorrências recentes
-  • Pendências apenas administrativas
-  • Objetivo da internação já atingido
-
-- Reduzir probabilidade se:
-  • Instabilidade recente
-  • Novos sintomas ou complicações
-  • Alta dependência de suporte hospitalar
-  • Necessidade de intervenções frequentes
-
-- Casos paliativos:
-  → Avaliar se há controle sintomático suficiente para alta, mesmo sem cura
-
-DADOS DO PACIENTE:
-- Motivo da Internação: ${row['Motivo']}
-- Avaliação Médica / Histórico: ${row['MEDICA']}
-- Evolução de Enfermagem: ${row['ENF']}
-- Tempo de Internação: ${row['Qtde. Dias Internado']} dias
-
-FORMATO DE RESPOSTA (OBRIGATÓRIO EM JSON):
-
-{
-  "score": 0-100,
-  "label": "Baixa/Média/Alta",
-  "conclusion": "Síntese clínica objetiva explicando se o paciente tem ou não condição de alta neste momento",
-  "motivos": [
-    "Análise da evolução clínica com referência temporal",
-    "Nível de estabilidade atual",
-    "Grau de dependência hospitalar",
-    "Impacto real das pendências"
-  ]
-}`;
-
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { response_mime_type: "application/json" }
-      })
-    });
-
-    const data = await response.json();
-    const content = JSON.parse(data.candidates[0].content.parts[0].text);
-    
-    geminiCache[cacheKey] = content;
-    renderGeminiResult(content, resultDiv);
-  } catch (err) {
-    console.error("Gemini Error:", err);
-    loading.innerHTML = `<span style="color:var(--danger)">Erro ao consultar Gemini: ${err.message}</span>`;
-  } finally {
-    loading.style.display = 'none';
-  }
-}
-
-function renderGeminiResult(data, container) {
-  const color = data.score > 70 ? 'var(--success)' : data.score > 40 ? 'var(--warning)' : 'var(--danger)';
-  container.innerHTML = `
-    <div class="gemini-badge-premium">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/></svg>
-      Análise Clínica Avançada (Gemini)
-    </div>
-    <div class="ai-main-conclusion" style="border-left: 3px solid ${color}; padding-left: 12px; margin-top: 10px; font-weight: 600; color: var(--text);">
-      ${data.conclusion}
-    </div>
-    <div class="ai-details-grid" style="grid-template-columns: 1fr;">
-      <div class="ai-details-col">
-        <div class="ai-detail-label">Motivos da Decisão</div>
-        <ul class="ai-reasons">
-          ${data.motivos.map(m => `<li style="margin-bottom: 8px; line-height: 1.5;">${m}</li>`).join('')}
-        </ul>
-      </div>
-      <div class="ai-details-col" style="margin-top: 10px; display: flex; align-items: center; gap: 12px;">
-        <div class="gemini-score-big" style="color: ${color}; margin-bottom: 0;">${data.score}%</div>
-        <span class="status-badge" style="background: ${color}22; color: ${color}; border: 1px solid ${color}44;">Probabilidade ${data.label}</span>
-      </div>
-    </div>
-  `;
-}
-
-function toggleApiSettings() {
-  document.getElementById('apiPanel').classList.toggle('active');
-}
-
-// Persist API Key
-document.getElementById('geminiKey')?.addEventListener('input', (e) => {
-  localStorage.setItem('gemini-api-key', e.target.value);
-});
-
-(function initApiKey() {
-  const saved = localStorage.getItem('gemini-api-key');
-  if (saved && document.getElementById('geminiKey')) {
-    document.getElementById('geminiKey').value = saved;
-  }
-})();
 
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
