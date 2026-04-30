@@ -696,6 +696,16 @@ body {
   background: rgba(255,255,255,0.05);
 }
 
+.btn-save-copy {
+  border-color: rgba(16,185,129,0.3) !important;
+  color: var(--success) !important;
+}
+
+.btn-save-copy:hover {
+  background: rgba(16,185,129,0.08) !important;
+  border-color: var(--success) !important;
+}
+
 /* =============================================
    SEARCH
    ============================================= */
