@@ -22,7 +22,6 @@ const TABLE_COLS = [
   { key: 'Usuário',            label: 'Paciente' },
   { key: 'Prestador',          label: 'Prestador' },
   { key: 'ADM',                label: 'ADM / Status' },
-  { key: 'ALTA',               label: 'Alta' },
   { key: 'ACM',                label: 'ACM' },
   { key: 'Tipo Acomodação',    label: 'Acomodação' },
   { key: 'Tipo Internação',    label: 'Tipo Internação' },
@@ -37,7 +36,6 @@ const TABLE_COLS = [
 
 // ─── FILTER COLUMNS ──────────────────────────
 const FILTER_COLS = [
-  { key: 'ALTA',            label: 'Alta' },
   { key: 'ACM',             label: 'ACM' },
   { key: 'ABORDAGEM',       label: 'Abordagem' },
   { key: 'Tipo Acomodação', label: 'Acomodação' },
@@ -159,12 +157,10 @@ function buildKPIs(rows) {
   // Always compute counts from ALL rows so values don't collapse when filtered
   const base = allRows;
   const total = base.length;
-  const altas = base.filter(r => r['ALTA'] === 'ALTA HOSPITALAR').length;
-  const permanece = base.filter(r => r['ALTA'] === 'PERMANECE').length;
   const utis = base.filter(r => r['ACM'] && r['ACM'].toUpperCase().includes('UTI')).length;
   const oncos = base.filter(r => r['ONCO'] && r['ONCO'] !== '').length;
   const reint = base.filter(r => r['REINTERNAÇÃO'] && r['REINTERNAÇÃO'].toUpperCase() === 'SIM').length;
-  const aiHigh = base.filter(r => getAIAnalysis(r).score > 70 && r['ALTA'] !== 'ALTA HOSPITALAR').length;
+  const aiHigh = base.filter(r => getAIAnalysis(r).score > 70).length;
 
 
   // Avg dias from currently filtered rows
@@ -176,28 +172,10 @@ function buildKPIs(rows) {
       id: 'total',
       label: 'Total Internações',
       value: total,
-      sub: `${altas} altas hoje`,
+      sub: `em acompanhamento`,
       color: 'blue',
       tip: 'Clique para limpar filtros',
-      filter: null   // special: clears all KPI filters
-    },
-    {
-      id: 'altas',
-      label: 'Altas Hoje',
-      value: altas,
-      sub: `${((altas/total)*100||0).toFixed(0)}% do total`,
-      color: 'green',
-      tip: 'Filtrar por alta hospitalar',
-      filter: { key: 'ALTA', value: 'ALTA HOSPITALAR' }
-    },
-    {
-      id: 'permanece',
-      label: 'Permanece',
-      value: permanece,
-      sub: `aguardando alta`,
-      color: 'blue',
-      tip: 'Filtrar por pacientes que permanecem',
-      filter: { key: 'ALTA', value: 'PERMANECE' }
+      filter: null
     },
     {
       id: 'uti',
@@ -364,8 +342,7 @@ function applyKpiFilter(kpiId) {
   if (activeKpi === kpiId || kpiId === 'total') {
     activeKpi = null;
     // Remove any KPI-injected keys from activeFilters
-    delete activeFilters['ALTA'];
-    delete activeFilters['REINTERNAÇÃO'];
+    delete activeKpi; // clear KPI context
     delete activeFilters['_uti'];
     delete activeFilters['_onco'];
     delete activeFilters['_ai_high'];
@@ -380,17 +357,13 @@ function applyKpiFilter(kpiId) {
 
   activeKpi = kpiId;
 
-  // Clear any previous KPI-driven ALTA / REINTERNAÇÃO / custom keys
-  delete activeFilters['ALTA'];
-  delete activeFilters['REINTERNAÇÃO'];
+  // Clear any previous KPI-driven custom keys
   delete activeFilters['_uti'];
   delete activeFilters['_onco'];
   delete activeFilters['_ai_high'];
 
 
   const kpiMap = {
-    altas:     { key: 'ALTA',         value: 'ALTA HOSPITALAR' },
-    permanece: { key: 'ALTA',         value: 'PERMANECE' },
     reint:     { key: 'REINTERNAÇÃO', value: 'SIM' },
     uti:       { key: '_uti',         value: true },
     onco:      { key: '_onco',        value: true },
