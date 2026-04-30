@@ -13,6 +13,7 @@ let sortDir = 'asc';
 let activeFilters = {};
 let searchQuery = '';
 let activeKpi = null; // id of the currently active KPI card
+let geminiCache = {}; // Cache for Gemini API results
 
 // ─── VISIBLE COLUMNS in TABLE ────────────────
 const TABLE_COLS = [
@@ -887,36 +888,38 @@ function openModal(globalIndex) {
       </div>`).join('');
 
   // IA Insight Section
-  const ai = getAIAnalysis(row);
+  const regexAi = getAIAnalysis(row);
+  const aiSectionId = `ai-section-${globalIndex}`;
+  
   const aiSection = `
-    <div class="modal-ai-insight">
+    <div class="modal-ai-insight" id="${aiSectionId}">
       <div class="ai-insight-header">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ai-insight-icon">
           <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
         </svg>
         <span>Análise Preditiva de Alta</span>
-        <span class="ai-insight-badge" style="background: ${ai.color}22; color: ${ai.color}">${ai.label} (${ai.score}%)</span>
+        <span class="ai-insight-badge" style="background: ${regexAi.color}22; color: ${regexAi.color}">${regexAi.label} (${regexAi.score}%)</span>
       </div>
       <div class="ai-insight-body">
         <div class="ai-main-conclusion">
-          Com base na análise clínica, o paciente apresenta <strong>${ai.label.toLowerCase()} possibilidade de alta</strong> no curto prazo.
+          ${regexAi.label === 'Sem dados' ? 'Aguardando dados clínicos...' : `Análise preliminar indica <strong>${regexAi.label.toLowerCase()} possibilidade de alta</strong>.`}
         </div>
-        
-        <div class="ai-details-grid">
-          <div class="ai-details-col">
-            <div class="ai-detail-label">Motivos da Análise</div>
-            <ul class="ai-reasons">
-              ${ai.reasons.length ? ai.reasons.map(r => `<li>${r}</li>`).join('') : '<li>Sem evidências conclusivas</li>'}
-            </ul>
-          </div>
-          <div class="ai-details-col">
-            <div class="ai-detail-label">Frases-chave Identificadas</div>
-            <div class="ai-tags">
-              ${ai.matches.length ? ai.matches.map(m => `
-                <span class="ai-tag ${m.type}">
-                  ${m.label} <small>"${m.text}"</small>
-                </span>
-              `).join('') : '<span class="ai-tag empty">Nenhuma frase identificada</span>'}
+        <div class="ai-loading-placeholder" id="gemini-loading" style="display:none">
+          <div class="spinner-small"></div> Consultando Inteligência Médica Gemini...
+        </div>
+        <div id="gemini-result">
+          <div class="ai-details-grid">
+            <div class="ai-details-col">
+              <div class="ai-detail-label">Motivos (Regex)</div>
+              <ul class="ai-reasons">
+                ${regexAi.reasons.length ? regexAi.reasons.map(r => `<li>${r}</li>`).join('') : '<li>Sem evidências conclusivas</li>'}
+              </ul>
+            </div>
+            <div class="ai-details-col">
+              <div class="ai-detail-label">Contextos Identificados</div>
+              <div class="ai-tags">
+                ${regexAi.matches.length ? regexAi.matches.map(m => `<span class="ai-tag ${m.type}">${m.label}</span>`).join('') : '<span class="ai-tag empty">Nenhum contexto isolado</span>'}
+              </div>
             </div>
           </div>
         </div>
@@ -931,7 +934,96 @@ function openModal(globalIndex) {
   `;
 
   document.getElementById('modalOverlay').classList.add('open');
+
+  // Trigger Gemini if API Key is present
+  const apiKey = document.getElementById('geminiKey').value;
+  if (apiKey && (row['ENF'] || row['MEDICA'] || row['Motivo'])) {
+    runGeminiAnalysis(row, aiSectionId, apiKey);
+  }
 }
+
+async function runGeminiAnalysis(row, containerId, apiKey) {
+  const cacheKey = row['Senha'];
+  const loading = document.getElementById('gemini-loading');
+  const resultDiv = document.getElementById('gemini-result');
+  
+  if (geminiCache[cacheKey]) {
+    renderGeminiResult(geminiCache[cacheKey], resultDiv);
+    return;
+  }
+
+  loading.style.display = 'flex';
+  
+  try {
+    const prompt = `Analise o seguinte caso clínico de internação hospitalar e avalie a previsibilidade de alta (Baixa, Média ou Alta) e o motivo. Seja conciso e profissional.
+    Paciente: ${row['Usuário']} | Dias Internado: ${row['Qtde. Dias Internado']} | Motivo: ${row['Motivo']}
+    Evolução Enfermagem: ${row['ENF']}
+    Avaliação Médica: ${row['MEDICA']}
+    Responda em formato JSON: {"score": 0-100, "label": "Baixa/Média/Alta", "conclusion": "...", "points": ["ponto 1", "ponto 2"]}`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { response_mime_type: "application/json" }
+      })
+    });
+
+    const data = await response.json();
+    const content = JSON.parse(data.candidates[0].content.parts[0].text);
+    
+    geminiCache[cacheKey] = content;
+    renderGeminiResult(content, resultDiv);
+  } catch (err) {
+    console.error("Gemini Error:", err);
+    loading.innerHTML = `<span style="color:var(--danger)">Erro ao consultar Gemini: ${err.message}</span>`;
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+function renderGeminiResult(data, container) {
+  const color = data.score > 70 ? 'var(--success)' : data.score > 40 ? 'var(--warning)' : 'var(--danger)';
+  container.innerHTML = `
+    <div class="gemini-badge-premium">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/></svg>
+      Análise Gemini AI
+    </div>
+    <div class="ai-main-conclusion" style="border-left: 3px solid ${color}; padding-left: 12px; margin-top: 10px;">
+      ${data.conclusion}
+    </div>
+    <div class="ai-details-grid">
+      <div class="ai-details-col">
+        <div class="ai-detail-label">Parecer Clínico</div>
+        <ul class="ai-reasons">
+          ${data.points.map(p => `<li>${p}</li>`).join('')}
+        </ul>
+      </div>
+      <div class="ai-details-col">
+        <div class="ai-detail-label">Score de Alta</div>
+        <div class="gemini-score-big" style="color: ${color}">${data.score}%</div>
+        <div class="ai-tag" style="border-color: ${color}44">${data.label} Probabilidade</div>
+      </div>
+    </div>
+  `;
+}
+
+function toggleApiSettings() {
+  document.getElementById('apiPanel').classList.toggle('active');
+}
+
+// Persist API Key
+document.getElementById('geminiKey')?.addEventListener('input', (e) => {
+  localStorage.setItem('gemini-api-key', e.target.value);
+});
+
+(function initApiKey() {
+  const saved = localStorage.getItem('gemini-api-key');
+  if (saved && document.getElementById('geminiKey')) {
+    document.getElementById('geminiKey').value = saved;
+  }
+})();
 
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
