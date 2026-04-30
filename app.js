@@ -52,6 +52,7 @@ const FILTER_COLS = [
 
 // ─── CSV PARSER ───────────────────────────────
 function parseCSV(text) {
+  const delimiter = detectDelimiter(text);
   const lines = [];
   let inQuote = false;
   let cell = '';
@@ -62,7 +63,7 @@ function parseCSV(text) {
     if (ch === '"') {
       if (inQuote && next === '"') { cell += '"'; i++; }
       else { inQuote = !inQuote; }
-    } else if (ch === ',' && !inQuote) {
+    } else if (ch === delimiter && !inQuote) {
       row.push(cell); cell = '';
     } else if ((ch === '\r' || ch === '\n') && !inQuote) {
       if (ch === '\r' && next === '\n') i++;
@@ -76,11 +77,20 @@ function parseCSV(text) {
   return lines;
 }
 
+function detectDelimiter(text) {
+  const sample = text.slice(0, 2000);
+  const commas = (sample.match(/,/g) || []).length;
+  const semicolons = (sample.match(/;/g) || []).length;
+  return semicolons > commas ? ';' : ',';
+}
+
 // ─── NORMALIZE VALUE ─────────────────────────
 function norm(v) {
   if (!v) return '';
   v = v.trim();
   if (v === '#N/D' || v === '#N/A') return '';
+  // Remove possible formula artifacts from SIGO
+  if (v.startsWith('*=PROCV')) return '';
   return v;
 }
 
@@ -100,23 +110,100 @@ document.getElementById('csvInput').addEventListener('change', function (e) {
       hideLoading(loading);
     }
   };
+  // Try to detect encoding or default to latin1 which is common for Brazilian CSVs
   reader.readAsText(file, 'latin1');
 });
 
 function processCSV(text, filename) {
-  const lines = parseCSV(text);
+  let lines = parseCSV(text);
   if (lines.length < 2) { alert('Arquivo vazio ou inválido.'); return; }
 
-  // Strip BOM from first header cell
-  const rawHeaders = lines[0].map((h, i) => i === 0 ? h.replace(/^\uFEFF|^ÿ/, '') : h);
-  headers = rawHeaders;
+  // Detect SIGO vs Legacy
+  // SIGO usually has "SENHA" but maybe not on the first line
+  let headerIndex = -1;
+  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    if (lines[i].some(c => c.trim().toUpperCase() === 'SENHA')) {
+      headerIndex = i;
+      break;
+    }
+  }
 
-  // Build objects, skip empty rows (no Senha)
-  allRows = lines.slice(1)
+  if (headerIndex === -1) headerIndex = 0;
+
+  // Strip BOM and normalize headers
+  const rawHeaders = lines[headerIndex].map((h, i) => {
+    let clean = i === 0 ? h.replace(/^\uFEFF|^ÿ/, '') : h;
+    return clean.trim().toUpperCase();
+  });
+
+  const isSigoFormat = rawHeaders.includes('NOME DO PACIENTE') || rawHeaders.includes('QUEM VALIDOU?');
+
+  const SIGO_MAP = {
+    'SENHA': 'Senha',
+    'HOSPITAL': 'Prestador',
+    'NOME DO PACIENTE': 'Usuário',
+    'CARTEIRINHA': 'Código Usuário',
+    'DATA DE INCLUSÃO': 'Data Internação',
+    'PENDÊNCIA': 'Motivo',
+    'QUEM VALIDOU?': 'Auditor',
+    'STATUS': 'ENF',
+    'HORARIO': 'Hora'
+  };
+
+  // Build rows
+  allRows = lines.slice(headerIndex + 1)
     .filter(r => r.length > 1 && norm(r[0]) !== '')
     .map(r => {
       const obj = {};
-      headers.forEach((h, i) => { obj[h] = norm(r[i] || ''); });
+      if (isSigoFormat) {
+        // Map SIGO columns to internal keys
+        rawHeaders.forEach((h, i) => {
+          const key = SIGO_MAP[h] || h;
+          obj[key] = norm(r[i] || '');
+        });
+        
+        // Synthesize missing fields for SIGO
+        if (!obj['Motivo']) obj['Motivo'] = obj['ABORDAGEM'];
+        
+        // Try to detect ACM (Acomodação) from Status
+        const statusText = (obj['ENF'] || '').toUpperCase();
+        if (statusText.includes('UTI') || statusText.includes('CTI')) obj['ACM'] = 'UTI';
+        else if (statusText.includes('APT') || statusText.includes('APART')) obj['ACM'] = 'APARTAMENTO';
+        else if (statusText.includes('ENF')) obj['ACM'] = 'ENFERMARIA';
+        else obj['ACM'] = 'N/A';
+
+        // Try to detect ALTA from Status
+        if (statusText.includes('ALTA')) obj['ALTA'] = 'ALTA HOSPITALAR';
+        else obj['ALTA'] = 'PERMANECE';
+
+        // Set ADM (table status) to a snippet of ENF
+        if (!obj['ADM']) {
+          obj['ADM'] = obj['ENF'] ? (obj['ENF'].length > 40 ? obj['ENF'].substring(0, 40) + '...' : obj['ENF']) : '–';
+        }
+
+        // Calculate Days if possible
+        if (obj['Data Internação']) {
+          const parts = obj['Data Internação'].split('/');
+          if (parts.length === 3) {
+            // Check if it's DD/MM/YYYY or MM/DD/YYYY
+            let d, m, y;
+            if (parseInt(parts[0]) > 12) { d = parts[0]; m = parts[1]; y = parts[2]; } // DD/MM
+            else { d = parts[0]; m = parts[1]; y = parts[2]; } // Default to DD/MM for Brazil
+            
+            const dateObj = new Date(y, m - 1, d);
+            if (!isNaN(dateObj)) {
+              const diff = Math.floor((new Date() - dateObj) / (1000 * 60 * 60 * 24));
+              obj['Qtde. Dias Internado'] = Math.max(0, diff).toString();
+            }
+          }
+        }
+      } else {
+        // Legacy format
+        lines[headerIndex].forEach((h, i) => {
+          const cleanH = i === 0 ? h.replace(/^\uFEFF|^ÿ/, '') : h;
+          obj[cleanH] = norm(r[i] || '');
+        });
+      }
       return obj;
     });
 
@@ -134,12 +221,23 @@ function processCSV(text, filename) {
   document.getElementById('searchInput').value = '';
 
   // Build UI
+  headers = Object.keys(allRows[0] || {});
   buildFilters();
   buildTableHeader();
   applyFiltersAndSearch();
 
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
+}
+
+function loadSigoSample() {
+  const sample = `ABORDAGEM;ENF;MEDICA;ONCO;RENAL CRONICO;GLOSA;TOT;CAPTADO;REINTERNAÇÃO;REGIÃO;AUDITOR;DIVISÃO;REDE
+"*=PROCV(C2;Planilha1!$C$2:$AE$1000;8;0)";"*=PROCV(C2;Planilha1!$C$2:$AE$1000;9;0)";"*=PROCV(C2;Planilha1!$C$2:$AE$1000;10;0)";;
+ILHA ADM ***** PENDÊNCIAS - RDI RIO DE JANEIRO
+SENHA ;HOSPITAL;NOME DO PACIENTE ;CARTEIRINHA;DATA DE INCLUSÃO ;HORARIO ;PENDÊNCIA ;QUEM VALIDOU? ;STATUS
+Y83477383;HOSPITAL SANTA IZABEL;VALDINEI DOS SANTOS QUINTANILHA;0M0LF000009016;02/03/2026;10:57;agendamento de remoção externa - RNM Cranio;MARIANA;"03/03 EDVALDO 09:17 Em contato com a Sra Luciana (esposa), me identifico e informo sobre o agendamento da remoção e que a ambulância está prevista para chegar as 10:30h no local de origem e 11:30h no local do exame."
+Y75834186;HOSPITAL RIOMAR;ANA MARIA BRASIL AFFONSO;0P4KE007285000;04/03/2026;08:00;Acolher a família para trazer para rede própria para que agilize o tratamento da paciente. ;CAMILA ;"04/03 EDVALDO 14:46: mais uma tentativa de contato sem sucesso com os números cadastrados. PACIENTE EM UTI."`;
+  processCSV(sample, 'RDI RIO DE JANEIRO SIGO 30.04.csv');
 }
 
 function loadSampleData() {
@@ -156,7 +254,8 @@ function buildKPIs(rows) {
   const base = allRows;
   const total = base.length;
   const reint = base.filter(r => r['REINTERNAÇÃO'] && r['REINTERNAÇÃO'].toUpperCase() === 'SIM').length;
-
+  const utis = base.filter(r => r['ACM'] && r['ACM'].toUpperCase().includes('UTI')).length;
+  const oncos = base.filter(r => r['ONCO'] && r['ONCO'].toUpperCase() !== 'NÃO' && r['ONCO'] !== '').length;
 
   // Avg dias from currently filtered rows
   const dias = rows.map(r => parseInt(r['Qtde. Dias Internado']) || 0).filter(d => d >= 0);

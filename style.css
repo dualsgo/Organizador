@@ -292,6 +292,14 @@ body {
 .btn-upload-large:hover { transform: translateY(-2px); box-shadow: 0 8px 32px var(--accent-glow); }
 .btn-upload-large svg { width: 18px; height: 18px; }
 
+.empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
 .btn-sample {
   display: inline-flex;
   align-items: center;
@@ -305,7 +313,6 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  margin-top: 12px;
 }
 
 .btn-sample:hover {
@@ -314,9 +321,20 @@ body {
   background: rgba(255,255,255,0.05);
 }
 
+.btn-sample.sigo {
+  background: rgba(59,130,246,0.05);
+  border-color: rgba(59,130,246,0.2);
+  color: var(--accent);
+}
+
+.btn-sample.sigo:hover {
+  background: rgba(59,130,246,0.1);
+  border-color: var(--accent);
+}
+
 .btn-sample svg { width: 14px; height: 14px; }
 
-.empty-hint { font-size: 12px; color: var(--text-3); margin-top: 16px; margin-bottom: 0; }
+.empty-hint { font-size: 12px; color: var(--text-3); margin-top: 24px; margin-bottom: 0; }
 
 /* =============================================
    DASHBOARD

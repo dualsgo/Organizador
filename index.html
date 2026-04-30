@@ -70,13 +70,21 @@
       </svg>
       Selecionar arquivo CSV
     </label>
-    <button class="btn-sample" onclick="loadSampleData()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>
-      </svg>
-      Usar dados de exemplo
-    </button>
-    <p class="empty-hint">Formato esperado: RDI RIO DE JANEIRO SIGO DD.MM.csv</p>
+    <div class="empty-actions">
+      <button class="btn-sample" onclick="loadSampleData()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>
+        </svg>
+        Exemplo RDI Antigo
+      </button>
+      <button class="btn-sample sigo" onclick="loadSigoSample()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>
+        </svg>
+        Exemplo SIGO Novo
+      </button>
+    </div>
+    <p class="empty-hint">Formatos suportados: Legacy (CSV vírgula) e SIGO (CSV ponto e vírgula)</p>
   </div>
 
   <!-- DASHBOARD -->
