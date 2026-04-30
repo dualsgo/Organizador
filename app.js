@@ -943,23 +943,31 @@ async function runGeminiAnalysis(row, containerId, apiKey) {
   loading.style.display = 'flex';
   
   try {
-    const prompt = `Analise detalhadamente o contexto clínico deste caso de internação e determine a probabilidade de alta hospitalar imediata ou no curtíssimo prazo. 
-    REGRAS: 
-    1. Não cite palavras-chave isoladas. 
-    2. Explique os motivos da sua decisão com base no estado geral, evolução e pendências citadas.
-    3. Indique claramente o que justifica a alta ou o que a está impedindo.
+    const prompt = `Faça uma análise clínica avançada para prever a probabilidade de alta hospitalar.
+    
+    CRITÉRIOS DE ANÁLISE:
+    1. CORRELAÇÃO: Relacione o "Motivo da Internação" com a "Avaliação Médica" e o histórico presente nos textos.
+    2. EVOLUÇÃO: Analise se a "Evolução (ENF)" indica melhora progressiva ou surgimento de novas pendências.
+    3. CONTEXTO: Considere o tempo de internação (${row['Qtde. Dias Internado']} dias) em relação à complexidade do diagnóstico.
+    
+    REGRAS DE RESPOSTA:
+    - Seja extremamente claro nos motivos.
+    - Não use listas de palavras-chave. Explique o cenário clínico.
+    - Se houver melhora clínica significativa em relação ao motivo inicial, eleve a probabilidade.
+    - Se houver pendências de exames ou instabilidade no histórico recente, reduza a probabilidade.
 
-    DADOS:
-    Paciente: ${row['Usuário']} | Dias Internado: ${row['Qtde. Dias Internado']} | Motivo: ${row['Motivo']}
-    Evolução Enfermagem: ${row['ENF']}
-    Avaliação Médica: ${row['MEDICA']}
+    DADOS DO PACIENTE:
+    - Motivo da Internação: ${row['Motivo']}
+    - Avaliação Médica / Histórico: ${row['MEDICA']}
+    - Evolução de Enfermagem: ${row['ENF']}
+    - Tempo de Internação: ${row['Qtde. Dias Internado']} dias
 
     RESPOSTA EM JSON: 
     {
       "score": 0-100, 
       "label": "Baixa/Média/Alta", 
-      "conclusion": "Resumo claro e direto da decisão", 
-      "motivos": ["Explicação detalhada 1", "Explicação detalhada 2"]
+      "conclusion": "Resumo executivo do caso", 
+      "motivos": ["Explicação contextualizada 1", "Explicação contextualizada 2"]
     }`;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
