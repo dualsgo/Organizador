@@ -415,13 +415,9 @@ function applyKpiFilter(kpiId) {
   // Toggle: clicking the active card clears the KPI filter
   if (activeKpi === kpiId || kpiId === 'total') {
     activeKpi = null;
-    // Remove any KPI-injected keys from activeFilters
-    delete activeKpi; // clear KPI context
     delete activeFilters['_uti'];
     delete activeFilters['_onco'];
-
-    // But restore select-driven filters if user had set them
-    // (they're cleared here for simplicity; selects already reset below)
+    delete activeFilters['REINTERNAÇÃO'];
     syncSelectsToFilters();
     currentPage = 1;
     applyFiltersAndSearch();
@@ -509,11 +505,27 @@ function applyFiltersAndSearch() {
     for (const [key, val] of Object.entries(activeFilters)) {
       // Custom virtual keys
       if (key === '_uti') {
-        if (!(row['ACM'] && row['ACM'].toUpperCase().includes('UTI'))) return false;
+        // Check ACM (synthesized for SIGO) OR ENF/ADM text (legacy)
+        const acm = (row['ACM'] || '').toUpperCase();
+        const enf = (row['ENF'] || row['ADM'] || '').toUpperCase();
+        const isUti = acm.includes('UTI') || acm.includes('CTI')
+                   || enf.includes('UTI') || enf.includes('CTI');
+        if (!isUti) return false;
         continue;
       }
       if (key === '_onco') {
-        if (!(row['ONCO'] && row['ONCO'] !== '')) return false;
+        // Check ONCO column (legacy) OR ENF/status text (SIGO)
+        const onco = (row['ONCO'] || '').toUpperCase();
+        const enf  = (row['ENF']  || '').toUpperCase();
+        const isOnco = (onco !== '' && onco !== 'NÃO' && onco !== 'NAO')
+                    || enf.includes('ONCO') || enf.includes('QT/RT') || enf.includes('QUIMIO');
+        if (!isOnco) return false;
+        continue;
+      }
+      if (key === 'REINTERNAÇÃO') {
+        // Accept both exact 'SIM' and values that start with 'SIM'
+        const rv = (row['REINTERNAÇÃO'] || '').toUpperCase();
+        if (!rv.startsWith('SIM')) return false;
         continue;
       }
       if (row[key] !== val) return false;
