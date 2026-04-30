@@ -668,7 +668,7 @@ function getAIAnalysis(row) {
   const enf = (row['ENF'] || '').toLowerCase();
   const med = (row['MEDICA'] || '').toLowerCase();
   const mot = (row['Motivo'] || '').toLowerCase();
-  const text = `${enf} ${med} ${mot}`;
+  const text = `${enf} | ${med} | ${mot}`;
 
   if (!enf && !med && !mot) return { 
     score: 0, 
@@ -678,63 +678,59 @@ function getAIAnalysis(row) {
     matches: [] 
   };
 
-  const positive = [
-    { t: 'melhora', w: 15, label: 'Melhora clínica' }, 
-    { t: 'estável', w: 10, label: 'Estabilidade' }, 
-    { t: 'estabilidade', w: 10, label: 'Estabilidade' },
-    { t: 'boa evolução', w: 15, label: 'Boa evolução' }, 
-    { t: 'alta', w: 25, label: 'Menção de alta' }, 
-    { t: 'proposta', w: 15, label: 'Proposta de conduta' },
-    { t: 'aceita dieta', w: 10, label: 'Aceitando dieta' }, 
-    { t: 'afebril', w: 10, label: 'Afebril' }, 
-    { t: 'deambula', w: 10, label: 'Deambulando' },
-    { t: 'lúcido', w: 5, label: 'Lúcido' }, 
-    { t: 'orientado', w: 5, label: 'Orientado' }, 
-    { t: 'concluído', w: 10, label: 'Ciclo concluído' },
-    { t: 'alta hospitalar', w: 30, label: 'Alta hospitalar' }, 
-    { t: 'programada', w: 20, label: 'Alta programada' },
-    { t: 'aguarda exames', w: -5, label: 'Aguardando exames' },
-    { t: 'exames ok', w: 15, label: 'Exames satisfatórios' },
-    { t: 'retirada de dreno', w: 15, label: 'Retirada de dreno' },
-    { t: 'medicação oral', w: 15, label: 'Migração para VO' },
-    { t: 'fisioterapia motora', w: 5, label: 'Fisioterapia' }
+  // Complex Contextual Rules (Regex)
+  const rules = [
+    // HIGH POSITIVE (Discharge imminent)
+    { reg: /alta (hospitalar|programada|amanhã|hoje|confirmada)/i, w: 40, label: 'Alta confirmada/programada', type: 'pos' },
+    { reg: /proposta de alta|planejamento de alta|previsão de alta/i, w: 25, label: 'Planejamento de alta', type: 'pos' },
+    { reg: /aguarda (transporte|familiar|ambulância) para alta/i, w: 35, label: 'Aguardando saída', type: 'pos' },
+    
+    // POSITIVE PROGRESSION
+    { reg: /(boa|excelente) evolução|evoluindo bem/i, w: 15, label: 'Boa evolução clínica', type: 'pos' },
+    { reg: /estável (com melhora|sem intercorrências)/i, w: 15, label: 'Estabilidade favorável', type: 'pos' },
+    { reg: /quadro estável|paciente estável|segue estável/i, w: 10, label: 'Estabilidade clínica', type: 'pos' },
+    { reg: /aceitando dieta (oral|vo)|dieta livre/i, w: 10, label: 'Alimentação preservada', type: 'pos' },
+    { reg: /lúcido[,\s]+orientado[,\s]+afebril/i, w: 15, label: 'Quadro clínico limpo', type: 'pos' },
+    { reg: /migração para (vo|medicação oral)|término de (atb|antibiótico)/i, w: 20, label: 'Desmame de medicação EV', type: 'pos' },
+    { reg: /deambula|fora do leito|sentado na poltrona/i, w: 10, label: 'Paciente mobilizado', type: 'pos' },
+    { reg: /exames (dentro da normalidade|normais|ok)/i, w: 15, label: 'Exames laboratoriais normais', type: 'pos' },
+    { reg: /retirada de (dreno|cateter|sonda)/i, w: 12, label: 'Retirada de dispositivos', type: 'pos' },
+
+    // NEGATIONS (Positive)
+    { reg: /sem (febre|picos febris|novas queixas|intercorrências|vômitos)/i, w: 10, label: 'Ausência de sintomas críticos', type: 'pos' },
+    { reg: /sem (dor|dispneia|desconforto|sangramento)/i, w: 8, label: 'Conforto clínico', type: 'pos' },
+
+    // PENDING / CAUTIOUS
+    { reg: /aguarda (exames|resultado|avaliação|imagem|tomografia|ressonância)/i, w: -10, label: 'Aguardando exames', type: 'neg' },
+    { reg: /aguarda (parecer|especialista|vaga|transferência|transporte)/i, w: -15, label: 'Dependência de logística/parecer', type: 'neg' },
+    { reg: /em investigação|quadro a esclarecer|hipótese diagnóstica/i, w: -10, label: 'Diagnóstico pendente', type: 'neg' },
+    { reg: /estável porém (grave|reservado)/i, w: -10, label: 'Estabilidade com gravidade', type: 'neg' },
+
+    // NEGATIVE / CRITICAL
+    { reg: /quadro (grave|crítico|instável)/i, w: -30, label: 'Quadro clínico instável', type: 'neg' },
+    { reg: /piora (clínica|do padrão|neurológica)/i, w: -25, label: 'Piora clínica', type: 'neg' },
+    { reg: /sepse|choque|insuficiência|insuficiente/i, w: -35, label: 'Condição de risco vital', type: 'neg' },
+    { reg: /rebaixamento (do nível de consciência|sensório)/i, w: -25, label: 'Comprometimento neurológico', type: 'neg' },
+    { reg: /em regime de (uti|cti|semi)/i, w: -30, label: 'Unidade Intensiva', type: 'neg' },
+    { reg: /necessita (diálise|hemodiálise|ventilação)/i, w: -20, label: 'Suporte avançado de vida', type: 'neg' },
+    { reg: /febre|pico febril|leucocitose/i, w: -15, label: 'Sinais de infecção ativa', type: 'neg' }
   ];
 
-  const negative = [
-    { t: 'piora', w: 25, label: 'Piora clínica' }, 
-    { t: 'instável', w: 20, label: 'Instabilidade' }, 
-    { t: 'grave', w: 20, label: 'Quadro grave' },
-    { t: 'crítico', w: 25, label: 'Estado crítico' }, 
-    { t: 'febre', w: 15, label: 'Febre' }, 
-    { t: 'aguardando exames', w: 15, label: 'Pendência de exames' },
-    { t: 'pendente', w: 10, label: 'Pendência' }, 
-    { t: 'uti', w: 30, label: 'Em regime de UTI' }, 
-    { t: 'cti', w: 30, label: 'Em regime de CTI' },
-    { t: 'desorientado', w: 15, label: 'Desorientação' }, 
-    { t: 'dor intensa', w: 15, label: 'Dor intensa' }, 
-    { t: 'transferência', w: 10, label: 'Necessita transferência' },
-    { t: 'rebaixamento', w: 25, label: 'Rebaixamento de consciência' },
-    { t: 'sepse', w: 30, label: 'Sepse/Choque' },
-    { t: 'isquemia', w: 20, label: 'Isquemia' }
-  ];
-
-  let score = 30; // base score
+  let score = 35; // base score
   const reasons = [];
   const matches = [];
 
-  positive.forEach(p => {
-    if (text.includes(p.t)) {
-      score += p.w;
-      matches.push({ type: 'pos', text: p.t, label: p.label });
-      if (p.w >= 15) reasons.push(`Indício de ${p.label}`);
-    }
-  });
-
-  negative.forEach(n => {
-    if (text.includes(n.t)) {
-      score -= n.w;
-      matches.push({ type: 'neg', text: n.t, label: n.label });
-      if (n.w >= 15) reasons.push(`Alerta: ${n.label}`);
+  rules.forEach(rule => {
+    if (rule.reg.test(text)) {
+      score += rule.w;
+      matches.push({ 
+        type: rule.type, 
+        text: text.match(rule.reg)[0], 
+        label: rule.label 
+      });
+      if (Math.abs(rule.w) >= 15) {
+        reasons.push(rule.w > 0 ? `Indício de ${rule.label}` : `Alerta: ${rule.label}`);
+      }
     }
   });
 
@@ -744,6 +740,9 @@ function getAIAnalysis(row) {
     score -= 5;
     reasons.push('Longa permanência (>15 dias)');
   }
+  if (days < 3) {
+    score += 5; // Early discharge bias for simple cases
+  }
 
   score = Math.max(5, Math.min(98, score));
 
@@ -752,7 +751,7 @@ function getAIAnalysis(row) {
   if (score > 70) { label = 'Alta'; color = 'var(--success)'; }
   else if (score > 40) { label = 'Média'; color = 'var(--warning)'; }
 
-  return { score, label, color, reasons: [...new Set(reasons)].slice(0, 4), matches };
+  return { score, label, color, reasons: [...new Set(reasons)].slice(0, 4), matches: matches.slice(0, 6) };
 }
 
 // ─── PAGINATION ──────────────────────────────
