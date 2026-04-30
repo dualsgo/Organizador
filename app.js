@@ -719,18 +719,12 @@ function getAIAnalysis(row) {
 
   let score = 35; // base score
   const reasons = [];
-  const matches = [];
 
   rules.forEach(rule => {
     if (rule.reg.test(text)) {
       score += rule.w;
-      matches.push({ 
-        type: rule.type, 
-        text: text.match(rule.reg)[0], 
-        label: rule.label 
-      });
-      if (Math.abs(rule.w) >= 15) {
-        reasons.push(rule.w > 0 ? `Indício de ${rule.label}` : `Alerta: ${rule.label}`);
+      if (Math.abs(rule.w) >= 10) {
+        reasons.push(rule.label);
       }
     }
   });
@@ -739,10 +733,10 @@ function getAIAnalysis(row) {
   const days = parseInt(row['Qtde. Dias Internado']) || 0;
   if (days > 15) {
     score -= 5;
-    reasons.push('Longa permanência (>15 dias)');
+    reasons.push('Longa permanência no hospital');
   }
   if (days < 3) {
-    score += 5; // Early discharge bias for simple cases
+    score += 5;
   }
 
   score = Math.max(5, Math.min(98, score));
@@ -752,7 +746,7 @@ function getAIAnalysis(row) {
   if (score > 70) { label = 'Alta'; color = 'var(--success)'; }
   else if (score > 40) { label = 'Média'; color = 'var(--warning)'; }
 
-  return { score, label, color, reasons: [...new Set(reasons)].slice(0, 4), matches: matches.slice(0, 6) };
+  return { score, label, color, reasons: [...new Set(reasons)].slice(0, 5) };
 }
 
 // ─── PAGINATION ──────────────────────────────
@@ -908,18 +902,12 @@ function openModal(globalIndex) {
           <div class="spinner-small"></div> Consultando Inteligência Médica Gemini...
         </div>
         <div id="gemini-result">
-          <div class="ai-details-grid">
+          <div class="ai-details-grid" style="grid-template-columns: 1fr;">
             <div class="ai-details-col">
-              <div class="ai-detail-label">Motivos (Regex)</div>
+              <div class="ai-detail-label">Fatores Determinantes</div>
               <ul class="ai-reasons">
-                ${regexAi.reasons.length ? regexAi.reasons.map(r => `<li>${r}</li>`).join('') : '<li>Sem evidências conclusivas</li>'}
+                ${regexAi.reasons.length ? regexAi.reasons.map(r => `<li>${r}</li>`).join('') : '<li>Dados clínicos insuficientes para uma conclusão clara.</li>'}
               </ul>
-            </div>
-            <div class="ai-details-col">
-              <div class="ai-detail-label">Contextos Identificados</div>
-              <div class="ai-tags">
-                ${regexAi.matches.length ? regexAi.matches.map(m => `<span class="ai-tag ${m.type}">${m.label}</span>`).join('') : '<span class="ai-tag empty">Nenhum contexto isolado</span>'}
-              </div>
             </div>
           </div>
         </div>
@@ -955,11 +943,24 @@ async function runGeminiAnalysis(row, containerId, apiKey) {
   loading.style.display = 'flex';
   
   try {
-    const prompt = `Analise o seguinte caso clínico de internação hospitalar e avalie a previsibilidade de alta (Baixa, Média ou Alta) e o motivo. Seja conciso e profissional.
+    const prompt = `Analise detalhadamente o contexto clínico deste caso de internação e determine a probabilidade de alta hospitalar imediata ou no curtíssimo prazo. 
+    REGRAS: 
+    1. Não cite palavras-chave isoladas. 
+    2. Explique os motivos da sua decisão com base no estado geral, evolução e pendências citadas.
+    3. Indique claramente o que justifica a alta ou o que a está impedindo.
+
+    DADOS:
     Paciente: ${row['Usuário']} | Dias Internado: ${row['Qtde. Dias Internado']} | Motivo: ${row['Motivo']}
     Evolução Enfermagem: ${row['ENF']}
     Avaliação Médica: ${row['MEDICA']}
-    Responda em formato JSON: {"score": 0-100, "label": "Baixa/Média/Alta", "conclusion": "...", "points": ["ponto 1", "ponto 2"]}`;
+
+    RESPOSTA EM JSON: 
+    {
+      "score": 0-100, 
+      "label": "Baixa/Média/Alta", 
+      "conclusion": "Resumo claro e direto da decisão", 
+      "motivos": ["Explicação detalhada 1", "Explicação detalhada 2"]
+    }`;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
@@ -988,22 +989,21 @@ function renderGeminiResult(data, container) {
   container.innerHTML = `
     <div class="gemini-badge-premium">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/></svg>
-      Análise Gemini AI
+      Análise Clínica Avançada (Gemini)
     </div>
-    <div class="ai-main-conclusion" style="border-left: 3px solid ${color}; padding-left: 12px; margin-top: 10px;">
+    <div class="ai-main-conclusion" style="border-left: 3px solid ${color}; padding-left: 12px; margin-top: 10px; font-weight: 600; color: var(--text);">
       ${data.conclusion}
     </div>
-    <div class="ai-details-grid">
+    <div class="ai-details-grid" style="grid-template-columns: 1fr;">
       <div class="ai-details-col">
-        <div class="ai-detail-label">Parecer Clínico</div>
+        <div class="ai-detail-label">Motivos da Decisão</div>
         <ul class="ai-reasons">
-          ${data.points.map(p => `<li>${p}</li>`).join('')}
+          ${data.motivos.map(m => `<li style="margin-bottom: 8px; line-height: 1.5;">${m}</li>`).join('')}
         </ul>
       </div>
-      <div class="ai-details-col">
-        <div class="ai-detail-label">Score de Alta</div>
-        <div class="gemini-score-big" style="color: ${color}">${data.score}%</div>
-        <div class="ai-tag" style="border-color: ${color}44">${data.label} Probabilidade</div>
+      <div class="ai-details-col" style="margin-top: 10px; display: flex; align-items: center; gap: 12px;">
+        <div class="gemini-score-big" style="color: ${color}; margin-bottom: 0;">${data.score}%</div>
+        <span class="status-badge" style="background: ${color}22; color: ${color}; border: 1px solid ${color}44;">Probabilidade ${data.label}</span>
       </div>
     </div>
   `;
