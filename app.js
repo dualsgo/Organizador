@@ -276,23 +276,23 @@ function buildHighlights(rows) {
     const acm = (r['ACM'] || '').toUpperCase();
     const dias = parseInt(r['Qtde. Dias Internado']) || 0;
     return (acm.includes('UTI') || acm.includes('CTI')) && dias >= 7;
-  }).slice(0, 3);
+  }).slice(0, 5);
 
-  // 2. High Discharge Prob: AI Score > 80
+  // 2. High Discharge Prob: AI Score > 70
   const highDischarge = rows.filter(r => {
     const ai = getAIAnalysis(r);
-    return ai.score >= 80 && r['ALTA'] !== 'ALTA HOSPITALAR';
-  }).slice(0, 3);
+    return ai.score >= 70 && r['ALTA'] !== 'ALTA HOSPITALAR';
+  }).slice(0, 5);
 
   // 3. Long Stay Alert: Dias > 15
   const longStay = rows.filter(r => {
     const dias = parseInt(r['Qtde. Dias Internado']) || 0;
     return dias >= 15;
-  }).slice(0, 3);
+  }).slice(0, 5);
 
   container.innerHTML = `
     ${renderHighlightCard('Casos Críticos (UTI + 7d)', critical, 'critical', 'alert-circle', 'Dias')}
-    ${renderHighlightCard('Probabilidade Alta (>80%)', highDischarge, 'success', 'check-circle', '% Alta')}
+    ${renderHighlightCard('Probabilidade Alta (>70%)', highDischarge, 'success', 'check-circle', '% Alta')}
     ${renderHighlightCard('Longa Permanência (>15d)', longStay, 'warning', 'clock', 'Dias')}
   `;
 }
