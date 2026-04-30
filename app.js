@@ -281,7 +281,7 @@ function buildHighlights(rows) {
   // 2. High Discharge Prob: AI Score > 70
   const highDischarge = rows.filter(r => {
     const ai = getAIAnalysis(r);
-    return ai.score >= 70 && r['ALTA'] !== 'ALTA HOSPITALAR';
+    return ai.score >= 70;
   }).slice(0, 5);
 
   // 3. Long Stay Alert: Dias > 15
@@ -943,32 +943,96 @@ async function runGeminiAnalysis(row, containerId, apiKey) {
   loading.style.display = 'flex';
   
   try {
-    const prompt = `Faça uma análise clínica avançada para prever a probabilidade de alta hospitalar.
-    
-    CRITÉRIOS DE ANÁLISE:
-    1. CORRELAÇÃO: Relacione o "Motivo da Internação" com a "Avaliação Médica" e o histórico presente nos textos.
-    2. EVOLUÇÃO: Analise se a "Evolução (ENF)" indica melhora progressiva ou surgimento de novas pendências.
-    3. CONTEXTO: Considere o tempo de internação (${row['Qtde. Dias Internado']} dias) em relação à complexidade do diagnóstico.
-    
-    REGRAS DE RESPOSTA:
-    - Seja extremamente claro nos motivos.
-    - Não use listas de palavras-chave. Explique o cenário clínico.
-    - Se houver melhora clínica significativa em relação ao motivo inicial, eleve a probabilidade.
-    - Se houver pendências de exames ou instabilidade no histórico recente, reduza a probabilidade.
+    const prompt = `Realize uma análise clínica avançada e estruturada para estimar a probabilidade de alta hospitalar, considerando evolução temporal, estabilidade clínica e dependência de suporte.
 
-    DADOS DO PACIENTE:
-    - Motivo da Internação: ${row['Motivo']}
-    - Avaliação Médica / Histórico: ${row['MEDICA']}
-    - Evolução de Enfermagem: ${row['ENF']}
-    - Tempo de Internação: ${row['Qtde. Dias Internado']} dias
+OBJETIVO:
+Determinar se o paciente apresenta condições reais de alta ou se ainda depende de suporte hospitalar ativo.
 
-    RESPOSTA EM JSON: 
-    {
-      "score": 0-100, 
-      "label": "Baixa/Média/Alta", 
-      "conclusion": "Resumo executivo do caso", 
-      "motivos": ["Explicação contextualizada 1", "Explicação contextualizada 2"]
-    }`;
+ETAPAS OBRIGATÓRIAS DE ANÁLISE:
+
+1. COMPREENSÃO DO CASO INICIAL
+- Identifique o quadro que motivou a internação.
+- Classifique implicitamente a gravidade e natureza (ex: agudo reversível vs doença crônica avançada).
+- Defina o objetivo da internação (ex: estabilização, controle sintomático, tratamento curativo/paliativo).
+
+2. ANÁLISE DA EVOLUÇÃO TEMPORAL
+- Leia a evolução médica em ordem cronológica.
+- Identifique tendência dominante:
+  • Melhora progressiva
+  • Estabilidade
+  • Piora/intercorrências recorrentes
+- Diferencie eventos antigos vs recentes (dar maior peso aos últimos registros).
+- Detecte surgimento de novas queixas ou complicações.
+
+3. ESTABILIDADE CLÍNICA ATUAL
+Avalie se há estabilidade nos seguintes eixos:
+- Hemodinâmica (ex: taquicardia persistente, instabilidade)
+- Sintomas principais (dor, dispneia, vômitos, etc.)
+- Capacidade funcional mínima (alimentação, controle de sintomas)
+- Necessidade de intervenções frequentes
+
+4. DEPENDÊNCIA DE SUPORTE HOSPITALAR
+Classifique implicitamente o nível de dependência:
+- Baixa: pode manter tratamento fora do hospital
+- Moderada: necessita suporte, mas possível transição (home care, etc.)
+- Alta: depende claramente de ambiente hospitalar
+
+Considere como fatores de alta dependência:
+- Nutrição parenteral contínua (NPT)
+- SNG aberta ou suporte invasivo
+- Necessidade frequente de intervenções (paracentese, drenagem, etc.)
+- Controle sintomático instável
+
+5. PENDÊNCIAS QUE IMPACTAM ALTA
+Separe claramente:
+- Pendências administrativas/logísticas (ex: "aguarda desospitalização")
+- Pendências clínicas relevantes (ex: exames, instabilidade, sangramento ativo)
+
+Importante:
+→ Nem toda pendência impede alta. Avaliar impacto real.
+
+6. CONTEXTO DO TEMPO DE INTERNAÇÃO
+- Relacione ${row['Qtde. Dias Internado']} dias com:
+  • Complexidade do caso
+  • Evolução clínica
+- Longa permanência com estabilidade pode sugerir elegibilidade para alta (ou transição de cuidado)
+
+REGRAS DE DECISÃO:
+
+- Aumentar probabilidade se:
+  • Estável clinicamente
+  • Sem novas intercorrências recentes
+  • Pendências apenas administrativas
+  • Objetivo da internação já atingido
+
+- Reduzir probabilidade se:
+  • Instabilidade recente
+  • Novos sintomas ou complicações
+  • Alta dependência de suporte hospitalar
+  • Necessidade de intervenções frequentes
+
+- Casos paliativos:
+  → Avaliar se há controle sintomático suficiente para alta, mesmo sem cura
+
+DADOS DO PACIENTE:
+- Motivo da Internação: ${row['Motivo']}
+- Avaliação Médica / Histórico: ${row['MEDICA']}
+- Evolução de Enfermagem: ${row['ENF']}
+- Tempo de Internação: ${row['Qtde. Dias Internado']} dias
+
+FORMATO DE RESPOSTA (OBRIGATÓRIO EM JSON):
+
+{
+  "score": 0-100,
+  "label": "Baixa/Média/Alta",
+  "conclusion": "Síntese clínica objetiva explicando se o paciente tem ou não condição de alta neste momento",
+  "motivos": [
+    "Análise da evolução clínica com referência temporal",
+    "Nível de estabilidade atual",
+    "Grau de dependência hospitalar",
+    "Impacto real das pendências"
+  ]
+}`;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
