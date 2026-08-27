@@ -3,18 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RDI – Organizador de Internações</title>
-  <meta name="description" content="Dashboard para organização e visualização de dados de internações do RDI Rio de Janeiro SIGO" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <title>RDI – Organizador de Internações SIGO</title>
+  <meta name="description" content="Dashboard clínico e administrativo para organização e visualização de dados de internações RDI SIGO" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+
+  <!-- DRAG & DROP OVERLAY -->
+  <div class="drag-drop-overlay" id="dragDropOverlay">
+    <div class="drag-drop-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <h3>Solte o arquivo CSV aqui</h3>
+      <p>O processamento e a análise começarão instantaneamente</p>
+    </div>
+  </div>
+
   <!-- HEADER -->
   <header class="header">
     <div class="header-inner">
-      <div class="header-brand">
+      <div class="header-brand" onclick="resetToInitialState()" title="Voltar ao início">
         <div class="brand-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
@@ -24,34 +35,60 @@
         </div>
         <div>
           <h1 class="brand-title">RDI <span>Rio de Janeiro</span></h1>
-          <p class="brand-sub">SIGO – Organizador de Internações</p>
+          <p class="brand-sub">SIGO – Painel Executivo</p>
         </div>
       </div>
+
       <div class="header-actions">
-        <div class="file-info" id="fileInfo">
+        <div class="file-info" id="fileInfo" style="display:none">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="file-icon">
             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
             <polyline points="14,2 14,8 20,8"/>
           </svg>
-          <span id="fileInfoText">Nenhum arquivo carregado</span>
+          <span id="fileInfoText">Nenhum arquivo</span>
         </div>
+
         <label class="btn-upload" for="csvInput" id="uploadLabel">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
             <polyline points="17,8 12,3 7,8"/>
             <line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          Carregar CSV
+          Importar CSV
         </label>
-        <button class="btn-icon" id="themeToggle" onclick="toggleTheme()" title="Alternar tema">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sun-icon">
-            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+
+        <button class="btn-icon" id="themeToggle" onclick="toggleTheme()" title="Alternar tema Claro/Escuro">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
           </svg>
         </button>
+
         <input type="file" id="csvInput" accept=".csv" style="display:none" />
       </div>
     </div>
   </header>
+
+  <!-- SESSION RESTORE ALERT -->
+  <div class="session-alert" id="sessionAlert" style="display:none">
+    <div class="session-alert-left">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+      <span id="sessionAlertText">Sessão anterior encontrada com registros salvos localmente.</span>
+    </div>
+    <div class="session-alert-actions">
+      <button class="btn-restore-session" onclick="restoreSavedSession()">Restaurar Sessão</button>
+      <button class="btn-dismiss-session" onclick="dismissSavedSession()">Dispensar</button>
+    </div>
+  </div>
 
   <!-- EMPTY STATE -->
   <div class="empty-state" id="emptyState">
@@ -61,7 +98,8 @@
       </svg>
     </div>
     <h2>Carregue o arquivo CSV do dia</h2>
-    <p>Selecione o arquivo RDI exportado do SIGO para visualizar o painel completo de internações.</p>
+    <p>Arraste e solte ou selecione o arquivo RDI exportado do SIGO para visualizar o painel executivo com analytics e timeline de pacientes.</p>
+    
     <label class="btn-upload-large" for="csvInput">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
@@ -70,107 +108,134 @@
       </svg>
       Selecionar arquivo CSV
     </label>
+
     <div class="empty-actions">
-      <button class="btn-sample" onclick="loadSampleData()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>
-        </svg>
-        Exemplo RDI Antigo
-      </button>
       <button class="btn-sample sigo" onclick="loadSigoSample()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>
         </svg>
-        Exemplo SIGO Novo
+        Carregar Amostra SIGO
+      </button>
+      <button class="btn-sample" onclick="loadSampleData()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/>
+        </svg>
+        Carregar Amostra Legada
       </button>
     </div>
-    <p class="empty-hint">Formatos suportados: Legacy (CSV vírgula) e SIGO (CSV ponto e vírgula)</p>
+    <p class="empty-hint">Suporte automático a encodings UTF-8 e Windows-1252 / ISO-8859-1 (delimitadores vírgula e ponto-e-vírgula)</p>
   </div>
 
   <!-- DASHBOARD -->
-  <div class="dashboard" id="dashboard" style="display:none">
+  <main class="dashboard" id="dashboard" style="display:none">
 
-    <!-- HIGHLIGHTS & ALERTS -->
-    <section class="highlights-section" id="highlightsSection" style="display:none"></section>
+    <!-- QUICK FILTER CHIPS -->
+    <div class="quick-filters-container" id="quickChipsContainer"></div>
 
-    <!-- KPI CARDS -->
+    <!-- ACTIVE FILTER BADGES -->
+    <div class="active-filters-bar" id="activeFiltersBar" style="display:none">
+      <span class="active-filters-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+        </svg>
+        Filtros Aplicados:
+      </span>
+      <div id="activeBadgesList" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></div>
+    </div>
+
+    <!-- HIGHLIGHTS & CRITICAL ALERTS -->
+    <section class="highlights-section" id="highlightsSection"></section>
+
+    <!-- KPI STATS CARDS -->
     <section class="kpi-section" id="kpiSection"></section>
 
-    <!-- CHARTS SECTION -->
-    <section class="charts-section" id="chartsSection" style="display:none"></section>
+    <!-- NATIVE INTERACTIVE CHARTS -->
+    <section class="charts-section" id="chartsSection"></section>
 
-    <!-- FILTERS -->
+    <!-- DETAILED FILTERS ACCORDION / GRID -->
     <section class="filters-section">
       <div class="filters-header">
         <h2 class="section-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/>
           </svg>
-          Filtros
+          Filtros Avançados
         </h2>
-        <button class="btn-clear-filters" id="clearFilters" onclick="clearAllFilters()">Limpar filtros</button>
+        <button class="btn-clear-filters" id="clearFilters" onclick="clearAllFilters()">Limpar todos os filtros</button>
       </div>
       <div class="filters-grid" id="filtersGrid"></div>
     </section>
 
-    <!-- SEARCH -->
+    <!-- SEARCH BAR -->
     <section class="search-section">
       <div class="search-bar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input type="text" id="searchInput" placeholder="Buscar por paciente, prestador, senha, empresa..." />
+        <input type="text" id="searchInput" placeholder="Buscar por paciente, hospital/prestador, senha, carteirinha, auditor ou diagnóstico..." />
         <span class="search-count" id="searchCount"></span>
       </div>
     </section>
 
-    <!-- TABLE -->
-    <section class="table-section">
+    <!-- DATA TABLE -->
+    <section class="table-section" id="tableSection">
       <div class="table-header">
         <h2 class="section-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
           </svg>
-          Internações
-          <span class="table-count" id="tableCount"></span>
+          Internações Acompanhadas
+          <span class="table-count" id="tableCount">0 registros</span>
         </h2>
+
         <div class="table-actions">
-          <button class="btn-secondary" id="exportBtn" onclick="exportToCSV()" title="Exportar dados filtrados (sem preamble)">
+          <button class="btn-secondary" id="exportBtn" onclick="exportToCSV()" title="Exportar tabela com os filtros atuais">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            Exportar filtrado
+            Exportar Filtrado
           </button>
-          <button class="btn-secondary btn-save-copy" id="saveFullBtn" onclick="exportFullCopy()" title="Salvar cópia fiel do arquivo original com edições">
+
+          <button class="btn-secondary btn-save-copy" id="saveFullBtn" onclick="exportFullCopy()" title="Salvar cópia fiel do arquivo original com as alterações realizadas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
               <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
             </svg>
-            Salvar cópia fiel
+            Salvar Cópia Fiel
           </button>
-          <button class="btn-secondary" onclick="window.print()" title="Imprimir relatório">
+
+          <button class="btn-secondary" onclick="window.print()" title="Imprimir / Salvar relatório em PDF">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
               <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
             </svg>
+            Imprimir
           </button>
-          <select id="pageSizeSelect" onchange="changePageSize(this.value)">
-            <option value="15">15 por página</option>
-            <option value="25" selected>25 por página</option>
-            <option value="50">50 por página</option>
-            <option value="100">100 por página</option>
+
+          <select id="densitySelect" onchange="changeDensity(this.value)" title="Densidade de visualização">
+            <option value="normal" selected>Normal</option>
+            <option value="compact">Compacta</option>
+          </select>
+
+          <select id="pageSizeSelect" onchange="changePageSize(this.value)" title="Linhas por página">
+            <option value="15">15 / pág</option>
+            <option value="25" selected>25 / pág</option>
+            <option value="50">50 / pág</option>
+            <option value="100">100 / pág</option>
           </select>
         </div>
       </div>
+
       <div class="table-wrapper">
         <table id="mainTable">
           <thead id="tableHead"></thead>
           <tbody id="tableBody"></tbody>
         </table>
       </div>
+
       <div class="pagination" id="pagination"></div>
     </section>
-  </div>
+  </main>
 
-  <!-- MODAL DETAIL -->
+  <!-- MODAL DETAIL & CLINICAL TIMELINE -->
   <div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
     <div class="modal" id="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
@@ -178,12 +243,28 @@
           <h3 class="modal-title" id="modalTitle"></h3>
           <p class="modal-subtitle" id="modalSubtitle"></p>
         </div>
-        <button class="modal-close" onclick="closeModal()">
+        <button class="modal-close" onclick="closeModal()" title="Fechar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
       </div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab-btn active" id="tabBtnTimeline" onclick="switchModalTab('timeline')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+          Evolução Clínica
+        </button>
+        <button class="modal-tab-btn" id="tabBtnFields" onclick="switchModalTab('fields')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+          Dados Cadastrais & Edição
+        </button>
+      </div>
+
       <div class="modal-body" id="modalBody"></div>
     </div>
   </div>
